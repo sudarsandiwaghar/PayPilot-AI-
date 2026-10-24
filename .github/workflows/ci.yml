@@ -1,0 +1,179 @@
+name: PayPilot AI CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  backend:
+    name: Backend Lint, Migrations & Tests
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_ADMIN_URL: postgresql+asyncpg://postgres:postgres_ci_admin_password@127.0.0.1:5432/postgres
+      DATABASE_URL: postgresql+asyncpg://paypilot:paypilot_test_password@127.0.0.1:5432/paypilot_dev
+      TEST_DATABASE_URL: postgresql+asyncpg://paypilot:paypilot_test_password@127.0.0.1:5432/paypilot_test
+      APP_ENV: development
+      APP_SECRET_KEY: test-ci-secret-key-at-least-16-bytes
+      PAYPAL_MODE: mock
+      LLM_PROVIDER: mock
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci_admin_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run Ruff linter
+        run: |
+          python -m ruff check app tests
+
+      - name: Provision application role and databases (as admin)
+        run: |
+          python - <<'EOF'
+          import asyncio
+          import os
+          import asyncpg
+
+          async def provision():
+              admin_url = os.environ["POSTGRES_ADMIN_URL"].replace("+asyncpg", "")
+              conn = await asyncpg.connect(admin_url)
+              try:
+                  # 1. Create or enforce restricted paypilot application role
+                  role_exists = await conn.fetchval(
+                      "SELECT 1 FROM pg_roles WHERE rolname = 'paypilot'"
+                  )
+                  if not role_exists:
+                      await conn.execute(
+                          "CREATE ROLE paypilot WITH LOGIN PASSWORD 'paypilot_test_password' "
+                          "NOSUPERUSER NOCREATEDB NOCREATEROLE;"
+                      )
+                      print("Created restricted role: paypilot (NOSUPERUSER, NOCREATEDB, NOCREATEROLE)")
+                  else:
+                      await conn.execute(
+                          "ALTER ROLE paypilot WITH NOSUPERUSER NOCREATEDB NOCREATEROLE;"
+                      )
+                      print("Enforced NOSUPERUSER, NOCREATEDB, NOCREATEROLE on paypilot")
+
+                  # 2. Create paypilot_dev owned by paypilot
+                  dev_exists = await conn.fetchval(
+                      "SELECT 1 FROM pg_database WHERE datname = 'paypilot_dev'"
+                  )
+                  if not dev_exists:
+                      await conn.execute("CREATE DATABASE paypilot_dev OWNER paypilot;")
+                      print("Created database: paypilot_dev (owner: paypilot)")
+                  else:
+                      print("Database paypilot_dev already exists.")
+
+                  # 3. Create paypilot_test owned by paypilot
+                  test_exists = await conn.fetchval(
+                      "SELECT 1 FROM pg_database WHERE datname = 'paypilot_test'"
+                  )
+                  if not test_exists:
+                      await conn.execute("CREATE DATABASE paypilot_test OWNER paypilot;")
+                      print("Created database: paypilot_test (owner: paypilot)")
+                  else:
+                      print("Database paypilot_test already exists.")
+
+              finally:
+                  await conn.close()
+
+          asyncio.run(provision())
+          EOF
+
+      - name: Verify application role privileges (must be unprivileged)
+        run: |
+          python - <<'EOF'
+          import asyncio
+          import os
+          import asyncpg
+
+          async def verify():
+              url = os.environ["DATABASE_URL"].replace("+asyncpg", "")
+              conn = await asyncpg.connect(url)
+              try:
+                  row = await conn.fetchrow(
+                      "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole "
+                      "FROM pg_roles WHERE rolname = current_user;"
+                  )
+                  print(f"Verified connection as role: {row['rolname']}")
+                  print(f"  SUPERUSER:   {row['rolsuper']}")
+                  print(f"  CREATEDB:    {row['rolcreatedb']}")
+                  print(f"  CREATEROLE:  {row['rolcreaterole']}")
+
+                  assert not row["rolsuper"], "Security violation: paypilot must NOT be superuser!"
+                  assert not row["rolcreatedb"], "Security violation: paypilot must NOT have createdb!"
+                  assert not row["rolcreaterole"], "Security violation: paypilot must NOT have createrole!"
+                  print("Security check passed: paypilot application role is strictly unprivileged.")
+              finally:
+                  await conn.close()
+
+          asyncio.run(verify())
+          EOF
+
+      - name: Run Alembic migrations on dev database
+        run: |
+          python -m alembic upgrade head
+
+      - name: Seed demo catalog on dev database
+        run: |
+          python -m app.seed.catalog
+
+      - name: Run full backend pytest suite
+        run: |
+          python -m pytest -v
+
+  frontend:
+    name: Frontend Lint & Production Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend linter (oxlint)
+        run: npm run lint
+
+      - name: Build frontend production bundle
+        env:
+          VITE_API_BASE_URL: http://127.0.0.1:8000
+        run: npm run build
