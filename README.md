@@ -195,7 +195,8 @@ From the project root, open a separate terminal:
 ```
 - **Backend API:** [http://127.0.0.1:8000](http://127.0.0.1:8000)
 - **Interactive Swagger Docs:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- **API Liveness Probe:** [http://127.0.0.1:8000/api/v1/health/live](http://127.0.0.1:8000/api/v1/health/live)
+- **API Liveness Probe:** [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health)
+- **API Readiness Probe:** [http://127.0.0.1:8000/api/v1/health/ready](http://127.0.0.1:8000/api/v1/health/ready)
 
 #### Terminal 2 — Start Frontend Dev Server:
 ```cmd
@@ -378,6 +379,36 @@ npm run build
 A full CI workflow is configured in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) to automatically validate all pushes and pull requests:
 - **Backend Job:** Starts a clean PostgreSQL 16 service container, installs dependencies, validates linting (`ruff check`), provisions test databases, executes Alembic migrations (`alembic upgrade head`), verifies catalog seeding (`python -m app.seed.catalog`), and runs the complete pytest test suite.
 - **Frontend Job:** Sets up Node.js 20, installs dependencies, validates code style with oxlint (`npm run lint`), and verifies production TypeScript compilation (`npm run build`).
+
+---
+
+## Staging Deployment Preparation
+
+PayPilot AI provides a containerized multi-tier staging deployment setup powered by Docker Compose. For the full guide and operational runbook, see [STAGING_DEPLOYMENT.md](STAGING_DEPLOYMENT.md).
+
+### Quick Staging Start:
+```bash
+# 1. Prepare environment files
+cp .env.staging.example .env.staging
+cp frontend/.env.staging.example frontend/.env.staging
+
+# 2. Build and launch staging services (PostgreSQL 16, FastAPI backend, Nginx frontend)
+docker compose -f docker-compose.staging.yml up -d --build
+
+# 3. Apply schema migrations
+docker compose -f docker-compose.staging.yml run --rm backend alembic upgrade head
+
+# 4. Seed product catalog
+docker compose -f docker-compose.staging.yml run --rm backend python -m app.seed.catalog
+
+# 5. Verify health probes
+curl -f http://localhost:8080/api/v1/health
+curl -f http://localhost:8080/api/v1/health/ready
+```
+
+- **Staging Web App:** [http://localhost:8080](http://localhost:8080)
+- **Payment Mode:** Explicitly set to `mock`. Real funds are never processed.
+- **Role Isolation:** Database managed by restricted `paypilot` user (`NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`).
 
 ---
 

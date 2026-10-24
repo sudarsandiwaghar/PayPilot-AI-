@@ -1,0 +1,87 @@
+services:
+  # ── PostgreSQL 16 Database Service ───────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: paypilot-staging-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-paypilot_staging_admin_secret}
+      POSTGRES_DB: paypilot_staging
+      PAYPILOT_DB_USER: ${PAYPILOT_DB_USER:-paypilot}
+      PAYPILOT_DB_PASSWORD: ${PAYPILOT_DB_PASSWORD:-paypilot_staging_pass}
+    volumes:
+      - pgdata_staging:/var/lib/postgresql/data
+      - ./scripts/init-staging-db.sh:/docker-entrypoint-initdb.d/init-staging-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ADMIN_USER:-postgres} -d paypilot_staging"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - paypilot-staging-net
+
+  # ── FastAPI Backend Service ──────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: paypilot-staging-backend
+    restart: unless-stopped
+    env_file:
+      - path: .env.staging
+        required: false
+    environment:
+      APP_ENV: staging
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8000
+      APP_DEBUG: "false"
+      APP_LOG_LEVEL: INFO
+      APP_SECRET_KEY: ${STAGING_APP_SECRET_KEY:-staging-secret-key-32-chars-long-minimum}
+      DATABASE_URL: ${STAGING_DATABASE_URL:-postgresql+asyncpg://paypilot:paypilot_staging_pass@db:5432/paypilot_staging}
+      DATABASE_ECHO: "false"
+      PAYPAL_MODE: mock
+      PAYPAL_BASE_URL: https://api-m.sandbox.paypal.com
+      STOCK_SWEEP_ENABLED: "true"
+      STOCK_SWEEP_INTERVAL_SECONDS: 60
+      LLM_PROVIDER: ${STAGING_LLM_PROVIDER:-mock}
+      LLM_API_KEY: ${STAGING_LLM_API_KEY:-}
+      CORS_ORIGINS: '["http://localhost:8080","http://127.0.0.1:8080","https://staging.paypilot.example.com"]'
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8000/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - paypilot-staging-net
+
+  # ── React Frontend + Nginx Reverse Proxy Service ────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.staging
+    container_name: paypilot-staging-frontend
+    restart: unless-stopped
+    ports:
+      - "${STAGING_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - paypilot-staging-net
+
+volumes:
+  pgdata_staging:
+    driver: local
+
+networks:
+  paypilot-staging-net:
+    driver: bridge

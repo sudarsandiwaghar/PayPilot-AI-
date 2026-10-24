@@ -96,6 +96,13 @@ async def _check_database(db: AsyncSession) -> ReadinessCheck:
 async def _check_paypal() -> ReadinessCheck:
     """Verify PayPal API is reachable with a lightweight GET."""
     settings = get_settings()
+    if settings.paypal_mode in ("mock", "demo"):
+        return ReadinessCheck(
+            name="paypal",
+            status="ok",
+            latency_ms=0.0,
+            error="Mock mode active — external network check skipped",
+        )
     if not settings.paypal_base_url:
         return ReadinessCheck(name="paypal", status="ok", error="Not configured — skipped")
 
