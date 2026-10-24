@@ -59,6 +59,42 @@ class StockService:
                     requested=item.quantity,
                 )
 
+            # Reclaim any expired reservations for this product under the row lock
+            # so stale/unswept holds (e.g. while backend was asleep) never falsely reject new orders
+            now = datetime.now(UTC)
+            exp_stmt = (
+                select(StockReservation)
+                .where(
+                    StockReservation.product_id == product.id,
+                    StockReservation.status == "held",
+                    StockReservation.expires_at <= now,
+                )
+                .with_for_update()
+            )
+            expired_res = list((await db.execute(exp_stmt)).scalars().all())
+            if expired_res:
+                reclaimed_qty = sum(r.quantity for r in expired_res)
+                product.stock_qty += reclaimed_qty
+                affected_order_ids: set[UUID] = set()
+                for r in expired_res:
+                    r.status = "released"
+                    affected_order_ids.add(r.order_id)
+
+                if affected_order_ids:
+                    from app.models.order import Order
+
+                    ord_stmt = (
+                        select(Order)
+                        .where(
+                            Order.id.in_(sorted(affected_order_ids, key=str)),
+                            Order.status.in_(["pending_payment", "payment_processing"]),
+                        )
+                        .with_for_update()
+                    )
+                    orders = list((await db.execute(ord_stmt)).scalars().all())
+                    for ord_obj in orders:
+                        ord_obj.status = "cancelled"
+
             if product.stock_qty < item.quantity:
                 raise InsufficientStock(
                     product_id=str(product.id),
@@ -85,34 +121,59 @@ class StockService:
         db: AsyncSession,
         order_id: UUID,
     ) -> int:
-        """Release all held stock for an order and restore product.stock_qty."""
-        stmt = (
-            select(StockReservation)
+        """Release all held stock for an order and restore product.stock_qty.
+
+        Follows strict hierarchical lock ordering (Product -> StockReservation)
+        to prevent deadlocks and ensure idempotent, exact-once stock restoration.
+        """
+        cand_stmt = (
+            select(StockReservation.product_id)
             .where(
                 StockReservation.order_id == order_id,
                 StockReservation.status == "held",
             )
+            .distinct()
         )
-        reservations = list((await db.execute(stmt)).scalars().all())
-        if not reservations:
+        product_ids = list((await db.execute(cand_stmt)).scalars().all())
+        if not product_ids:
             return 0
 
-        # Sort to prevent deadlocks
-        reservations.sort(key=lambda r: str(r.product_id))
+        # Sort product IDs to strictly guarantee lock ordering across all transactions
+        sorted_product_ids = sorted(product_ids, key=str)
+        total_released = 0
 
-        for res in reservations:
+        for prod_id in sorted_product_ids:
+            # 1. Lock Product first
             prod_stmt = (
                 select(Product)
-                .where(Product.id == res.product_id)
+                .where(Product.id == prod_id)
                 .with_for_update()
             )
             product = (await db.execute(prod_stmt)).scalar_one_or_none()
-            if product:
-                product.stock_qty += res.quantity
+            if product is None:
+                continue
 
-            res.status = "released"
+            # 2. Under the Product lock, lock and fetch held reservations for this order
+            res_stmt = (
+                select(StockReservation)
+                .where(
+                    StockReservation.order_id == order_id,
+                    StockReservation.product_id == prod_id,
+                    StockReservation.status == "held",
+                )
+                .with_for_update()
+            )
+            held_res = list((await db.execute(res_stmt)).scalars().all())
+            if not held_res:
+                continue
 
-        return len(reservations)
+            reclaimed_qty = sum(r.quantity for r in held_res)
+            product.stock_qty += reclaimed_qty
+            for r in held_res:
+                r.status = "released"
+            total_released += len(held_res)
+
+        return total_released
 
     @staticmethod
     async def commit_reservations_for_order(
@@ -126,6 +187,7 @@ class StockService:
                 StockReservation.order_id == order_id,
                 StockReservation.status == "held",
             )
+            .with_for_update()
         )
         reservations = list((await db.execute(stmt)).scalars().all())
         for res in reservations:
@@ -165,8 +227,9 @@ class StockService:
         """Idempotently sweep and release all expired held stock reservations.
 
         Can be scheduled periodically or run via CLI.
-        Uses row locks (`with_for_update()`) to prevent concurrent release races.
-        Restores product inventory, marks reservations 'released', and cancels abandoned orders.
+        Uses hierarchical row locks (`Product` -> `StockReservation` -> `Order`)
+        to eliminate deadlocks with concurrent checkouts, prevent double-releases,
+        restore product inventory, and cancel abandoned orders.
 
         Returns:
             Count of reservations released.
@@ -184,44 +247,64 @@ class StockService:
             pass
 
         now = datetime.now(UTC)
-        stmt = (
-            select(StockReservation)
+        cand_stmt = (
+            select(StockReservation.product_id)
             .where(
                 StockReservation.status == "held",
                 StockReservation.expires_at <= now,
             )
-            .with_for_update(skip_locked=True)
+            .distinct()
         )
-        expired_reservations = list((await db.execute(stmt)).scalars().all())
-        if not expired_reservations:
+        candidate_product_ids = list((await db.execute(cand_stmt)).scalars().all())
+        if not candidate_product_ids:
             return 0
 
-        # Sort to prevent deadlocks when locking products
-        expired_reservations.sort(key=lambda r: str(r.product_id))
-
+        # Sort product IDs to strictly guarantee lock ordering across all transactions
+        sorted_product_ids = sorted(candidate_product_ids, key=str)
+        total_released = 0
         affected_order_ids: set[UUID] = set()
 
-        for res in expired_reservations:
+        for prod_id in sorted_product_ids:
+            # 1. Lock Product first (identical lock ordering as reserve_stock_for_order)
             prod_stmt = (
                 select(Product)
-                .where(Product.id == res.product_id)
+                .where(Product.id == prod_id)
                 .with_for_update()
             )
             product = (await db.execute(prod_stmt)).scalar_one_or_none()
-            if product:
-                product.stock_qty += res.quantity
+            if product is None:
+                continue
 
-            res.status = "released"
-            affected_order_ids.add(res.order_id)
+            # 2. Under the Product lock, lock and fetch expired StockReservations
+            exp_stmt = (
+                select(StockReservation)
+                .where(
+                    StockReservation.product_id == prod_id,
+                    StockReservation.status == "held",
+                    StockReservation.expires_at <= now,
+                )
+                .with_for_update()
+            )
+            expired_res = list((await db.execute(exp_stmt)).scalars().all())
+            if not expired_res:
+                continue
 
-        # Cancel abandoned orders
+            reclaimed_qty = sum(r.quantity for r in expired_res)
+            product.stock_qty += reclaimed_qty
+            for r in expired_res:
+                r.status = "released"
+                affected_order_ids.add(r.order_id)
+            total_released += len(expired_res)
+
+        # 3. Lock and cancel abandoned orders (sorted by order_id)
         if affected_order_ids:
             from app.models.order import Order
 
+            sorted_order_ids = sorted(affected_order_ids, key=str)
             orders_stmt = (
                 select(Order)
                 .where(
-                    Order.id.in_(affected_order_ids),
+                    Order.id.in_(sorted_order_ids),
                     Order.status.in_(["pending_payment", "payment_processing"]),
                 )
                 .with_for_update()
@@ -231,7 +314,7 @@ class StockService:
                 ord_obj.status = "cancelled"
 
         await db.commit()
-        return len(expired_reservations)
+        return total_released
 
 
 if __name__ == "__main__":

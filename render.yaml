@@ -1,0 +1,79 @@
+# ==============================================================================
+# PayPilot AI — Render Blueprint (Zero-Cost Staging Deployment)
+# ==============================================================================
+# Services:
+# - Backend: Render Free Docker Web Service (FastAPI / Uvicorn)
+# - Frontend: Render Free Static Site (React 19 + TypeScript + Vite)
+# - Database: External Neon Free PostgreSQL (Serverless with TLS)
+# ==============================================================================
+
+services:
+  # ── Backend API Web Service (Render Free Docker) ────────────────────────────
+  - type: web
+    name: paypilot-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: APP_ENV
+        value: staging
+      - key: APP_HOST
+        value: 0.0.0.0
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_LOG_LEVEL
+        value: INFO
+      - key: APP_SECRET_KEY
+        generateValue: true
+      # Connects to external Neon Free PostgreSQL database.
+      # User supplies their Neon asyncpg TLS connection URL in Render dashboard:
+      # Format: postgresql+asyncpg://[user]:[password]@[endpoint].neon.tech/[dbname]?ssl=require
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_ECHO
+        value: "false"
+      # Payment mode explicitly set to mock — synthetic demo orders only
+      - key: PAYPAL_MODE
+        value: mock
+      - key: PAYPAL_BASE_URL
+        value: https://api-m.sandbox.paypal.com
+      # Stock hold sweeper: 600s interval allows Neon compute to auto-suspend (~5m sleep window)
+      - key: STOCK_SWEEP_ENABLED
+        value: "true"
+      - key: STOCK_SWEEP_INTERVAL_SECONDS
+        value: "600"
+      # AI Shopping Agent: mock provider requires zero external API credentials
+      - key: LLM_PROVIDER
+        value: mock
+      # Exact staging frontend origin (update if your Render frontend service is renamed)
+      - key: CORS_ORIGINS
+        value: '["https://paypilot-frontend.onrender.com"]'
+      # Startup lifecycle flags
+      - key: AUTO_MIGRATE
+        value: "true"
+      - key: AUTO_SEED
+        value: "true"
+
+  # ── Frontend Static Site (Render Free Static Site) ──────────────────────────
+  - type: web
+    name: paypilot-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    routes:
+      # SPA client-side routing fallback: rewrite deep links to /index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # References the public HTTPS URL of the Render backend web service
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: paypilot-backend
+          envVarKey: RENDER_EXTERNAL_URL
+

@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     # ── Application ──────────────────────────────────────────────
     app_env: str = Field(default="development", pattern=r"^(development|staging|production)$")
     app_host: str = "0.0.0.0"
-    app_port: int = 8000
+    app_port: int = Field(
+        default=8000,
+        validation_alias=AliasChoices("app_port", "port"),
+        description="Application HTTP port.",
+    )
     app_debug: bool = True
     app_log_level: str = "DEBUG"
     app_secret_key: str = Field(
@@ -103,15 +107,43 @@ class Settings(BaseSettings):
         description="Optional custom API endpoint URL for LLM provider.",
     )
 
+    @field_validator("database_url", "test_database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: str) -> str:
+        """Normalize database connection URLs for asyncpg/Neon compatibility.
+
+        - Converts 'postgres://' or 'postgresql://' to 'postgresql+asyncpg://'
+        - Converts '?sslmode=require' to '?ssl=require' (asyncpg expects 'ssl', not 'sslmode')
+        """
+        if not isinstance(v, str):
+            return v
+        url = v.strip()
+        if not url:
+            return url
+        if url.startswith("postgres://"):
+            url = "postgresql+asyncpg://" + url[len("postgres://"):]
+        elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+            url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+
+        if "sslmode=" in url:
+            url = url.replace("sslmode=require", "ssl=require")
+            url = url.replace("sslmode=verify-full", "ssl=verify-full")
+            url = url.replace("sslmode=verify-ca", "ssl=verify-ca")
+            url = url.replace("sslmode=prefer", "ssl=prefer")
+        return url
+
     # ── CORS ─────────────────────────────────────────────────────
     cors_origins: list[str] = Field(default=["http://localhost:3000", "http://localhost:5173"])
 
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
-        """Accept either a JSON string or a list."""
+        """Accept JSON string, comma-separated string, or list."""
         if isinstance(v, str):
-            return json.loads(v)
+            v = v.strip()
+            if v.startswith("[") and v.endswith("]"):
+                return json.loads(v)
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
     @model_validator(mode="after")

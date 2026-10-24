@@ -410,6 +410,9 @@ curl -f http://localhost:8080/api/v1/health/ready
 - **Payment Mode:** Explicitly set to `mock`. Real funds are never processed.
 - **Role Isolation:** Database managed by restricted `paypilot` user (`NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`).
 
+### Zero-Cost Cloud Staging (Render Free + Neon Free):
+For a 100% zero-cost cloud staging deployment on Render and Neon serverless PostgreSQL, see the dedicated guide: [RENDER_NEON_DEPLOYMENT.md](RENDER_NEON_DEPLOYMENT.md) and 1-click blueprint [`render.yaml`](render.yaml).
+
 ---
 
 ## Manual Prerequisites & Troubleshooting

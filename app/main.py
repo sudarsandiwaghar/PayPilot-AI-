@@ -31,8 +31,24 @@ from app.utils.logging import setup_logging
 
 
 async def _stock_sweep_worker(interval_seconds: int) -> None:
-    """Periodic background worker running stock sweep at configured interval."""
+    """Periodic background worker running stock sweep at configured interval.
+
+    Performs an immediate sweep on startup/wake-up to reclaim any holds that expired
+    while the backend container was stopped or sleeping, then repeats periodically.
+    """
     logger = logging.getLogger("paypilot.stock_sweep")
+
+    # Immediate sweep on startup/wake-up
+    try:
+        async with async_session_factory() as session:
+            count = await StockService.sweep_expired_reservations(session)
+            if count > 0:
+                logger.info("Startup stock sweep released %d expired reservations.", count)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.exception("Startup stock sweep encountered an error: %s; periodic sweep loop will continue.", e)
+
     while True:
         try:
             await asyncio.sleep(interval_seconds)
@@ -43,7 +59,7 @@ async def _stock_sweep_worker(interval_seconds: int) -> None:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning("Error in background stock sweep worker: %s", e)
+            logger.exception("Error in background stock sweep worker: %s", e)
 
 
 @asynccontextmanager
