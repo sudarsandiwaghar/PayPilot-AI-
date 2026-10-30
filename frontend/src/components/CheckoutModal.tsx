@@ -5,12 +5,12 @@ import {
   AlertTriangle,
   Clock,
   ArrowRight,
-  CheckCircle2,
   Lock,
 } from 'lucide-react'
 import { useSession } from '../context/useSession'
 import { api, ApiErrorResponse } from '../api/client'
 import { formatCurrency } from '../utils/currency'
+import { getProductImageUrl } from '../utils/productImages'
 
 export const CheckoutModal: React.FC = () => {
   const {
@@ -93,247 +93,259 @@ export const CheckoutModal: React.FC = () => {
     <div className="modal-backdrop" onClick={() => setIsCheckoutOpen(false)}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div
               style={{
                 width: '36px',
                 height: '36px',
                 borderRadius: '8px',
-                background: 'rgba(99, 102, 241, 0.2)',
+                backgroundColor: 'var(--color-tertiary)',
+                color: 'var(--color-secondary)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: 'var(--accent-primary)',
               }}
             >
               <ShieldCheck size={20} />
             </div>
             <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Checkout Preview & Binding</h2>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-subtle)' }}>
-                Cart v{checkoutPreview.cart_version} &bull; HMAC Signed Token
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: 'var(--color-text-primary)' }}>
+                Review Order & Reserve Stock
+              </h2>
+              <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                HMAC-Signed Review Gate &bull; 10-Minute Quote Validity &bull; 15-Minute Reservation on Confirmation
               </div>
             </div>
           </div>
           <button
+            id="checkout-modal-close-btn"
             type="button"
             onClick={() => setIsCheckoutOpen(false)}
-            style={{ background: 'none', border: 'none', color: 'var(--text-subtle)', cursor: 'pointer' }}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              padding: '4px',
+            }}
           >
             <X size={20} />
           </button>
         </div>
 
-        {/* Security Binding Notice */}
+        {/* Cryptographic Security Pill */}
         <div
+          className="purple-surface-panel"
           style={{
-            background: 'rgba(15, 23, 42, 0.6)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '8px',
             padding: '12px 14px',
-            marginBottom: '18px',
-            fontSize: '0.8rem',
-            color: 'var(--text-muted)',
+            borderRadius: '8px',
+            marginBottom: '16px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '8px',
+            fontSize: '0.8rem',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Lock size={14} color="var(--accent-emerald)" />
-            <span>Token: <code>{tokenPreviewSnippet}</code></span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Lock size={13} color="var(--color-secondary)" />
+            <span style={{ color: 'var(--color-text-secondary)' }}>Signed Token:</span>
+            <code style={{ color: 'var(--color-text-primary)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+              {tokenPreviewSnippet}
+            </code>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--accent-amber)' }}>
-            <Clock size={14} />
-            <span>Expires at {expiresAtDate}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-secondary)' }}>
+            <Clock size={13} />
+            <span>Expires: {expiresAtDate}</span>
           </div>
         </div>
 
-        {/* Price Change Warning */}
-        {priceChanges.length > 0 && (
-          <div className="alert alert-warning" style={{ marginBottom: '16px' }}>
-            <AlertTriangle size={18} />
-            <div>
-              <div style={{ fontWeight: 600 }}>Price Adjustments Detected</div>
-              <ul style={{ paddingLeft: '16px', marginTop: '4px', fontSize: '0.8rem' }}>
-                {priceChanges.map((pc) => (
-                  <li key={pc.product_id}>
-                    {pc.product_name}: {formatCurrency(pc.old_price_minor, checkoutPreview.currency)} &rarr;{' '}
-                    <strong>{formatCurrency(pc.new_price_minor, checkoutPreview.currency)}</strong>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        )}
-
-        {/* Stock Issue Warning */}
-        {stockWarnings.length > 0 && (
-          <div className="alert alert-error" style={{ marginBottom: '16px' }}>
-            <AlertTriangle size={18} />
-            <div>
-              <div style={{ fontWeight: 600 }}>Inventory Limitations</div>
-              <ul style={{ paddingLeft: '16px', marginTop: '4px', fontSize: '0.8rem' }}>
-                {stockWarnings.map((sw) => (
-                  <li key={sw.product_id}>
-                    {sw.product_name}: Available {sw.available_qty}, Requested {sw.requested_qty}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        )}
-
-        {/* Itemized Bound List */}
-        <div style={{ marginBottom: '20px' }}>
-          <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '8px', color: 'var(--text-muted)' }}>
-            Locked Items & Rates:
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {items.map((item) => (
-              <div
-                key={item.product_id}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  background: 'rgba(30, 41, 59, 0.4)',
-                  padding: '10px 14px',
-                  borderRadius: '6px',
-                  fontSize: '0.85rem',
-                }}
-              >
-                <div>
-                  <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{item.product_name}</span>
-                  <span style={{ color: 'var(--text-subtle)', marginLeft: '8px' }}>
-                    &times; {item.quantity} ({formatCurrency(item.unit_price_minor, item.currency || checkoutPreview.currency)} ea)
-                  </span>
-                </div>
-                <div style={{ fontWeight: 700, color: 'var(--text-main)' }}>
-                  {formatCurrency(item.line_total_minor, item.currency || checkoutPreview.currency)}
-                </div>
+        {/* Warnings / Notices */}
+        {hasNotices && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+            {priceChanges.map((change, i) => (
+              <div key={i} className="alert alert-warning">
+                <AlertTriangle size={16} />
+                <span>
+                  Price updated for <strong>{change.product_name}</strong>: was{' '}
+                  {formatCurrency(change.old_price_minor, checkoutPreview.currency)}, now{' '}
+                  {formatCurrency(change.new_price_minor, checkoutPreview.currency)}.
+                </span>
+              </div>
+            ))}
+            {stockWarnings.map((warn, i) => (
+              <div key={i} className="alert alert-error">
+                <AlertTriangle size={16} />
+                <span>
+                  Limited stock for <strong>{warn.product_name}</strong>: requested {warn.requested_qty}, available {warn.available_qty}.
+                </span>
               </div>
             ))}
           </div>
-        </div>
+        )}
 
-        {/* Breakdown & Total Price Row */}
-        <div
-          style={{
-            background: 'rgba(15, 23, 42, 0.4)',
-            borderRadius: '8px',
-            padding: '12px 14px',
-            marginBottom: '20px',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
-            <span>Subtotal:</span>
-            <span>{subtotalFormatted}</span>
-          </div>
-          {checkoutPreview.tax_minor > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
-              <span>Tax:</span>
-              <span>{taxFormatted}</span>
-            </div>
-          )}
+        {/* Items Summary */}
+        <div style={{ marginBottom: '20px' }}>
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center',
-              paddingTop: '8px',
-              borderTop: '1px solid rgba(255,255,255,0.06)',
-              marginTop: '6px',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              color: 'var(--color-text-secondary)',
+              paddingBottom: '8px',
+              borderBottom: '1px solid var(--color-border)',
             }}
           >
-            <div>
-              <div style={{ fontWeight: 700, color: 'var(--text-main)' }}>Validated Total:</div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)' }}>Bound by server signature</div>
+            <span>Item</span>
+            <span>Total</span>
+          </div>
+
+          {items.map((item, idx) => (
+            <div
+              key={idx}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 0',
+                borderBottom: '1px solid var(--color-border)',
+                fontSize: '0.88rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <img
+                  src={getProductImageUrl(item.product_image_url, item.product_name)}
+                  alt={item.product_name}
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '6px',
+                    objectFit: 'contain',
+                    border: '1px solid var(--color-border)',
+                    backgroundColor: 'var(--color-neutral)',
+                    padding: '2px',
+                  }}
+                />
+                <div>
+                  <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{item.product_name}</span>
+                  <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem', marginLeft: '6px' }}>
+                    &times; {item.quantity}
+                  </span>
+                </div>
+              </div>
+              <span style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                {formatCurrency(item.line_total_minor, item.currency)}
+              </span>
             </div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>
-              {totalFormatted}
-            </div>
+          ))}
+        </div>
+
+        {/* Financial Summary */}
+        <div
+          className="purple-surface-panel"
+          style={{
+            padding: '14px 16px',
+            borderRadius: '8px',
+            marginBottom: '20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            fontSize: '0.85rem',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-text-secondary)' }}>
+            <span>Subtotal</span>
+            <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{subtotalFormatted}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-text-secondary)' }}>
+            <span>Taxes & Fees</span>
+            <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{taxFormatted}</span>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              paddingTop: '8px',
+              borderTop: '1px solid var(--color-border)',
+              fontSize: '1.15rem',
+              fontWeight: 800,
+              color: 'var(--color-text-primary)',
+            }}
+          >
+            <span>Total Due</span>
+            <span>{totalFormatted}</span>
           </div>
         </div>
 
-        {/* Error Notification */}
+        {/* Error Alert */}
         {error && (
-          <div className="alert alert-error" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="alert alert-error" style={{ marginBottom: '16px' }}>
             <span>{error}</span>
-            {error.includes('PREVIEW_EXPIRED') && (
-              <button
-                type="button"
-                id="refresh-preview-btn"
-                className="btn btn-secondary"
-                style={{ padding: '6px 12px', fontSize: '0.8rem', whiteSpace: 'nowrap', marginLeft: '12px' }}
-                onClick={handleRefreshPreview}
-              >
-                Refresh Preview
-              </button>
-            )}
           </div>
         )}
 
-        {/* Mandatory Explicit Shopper Acknowledgment Checkbox */}
-        <div
-          id="checkout-confirm-container"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            padding: '12px 14px',
-            background: hasNotices ? 'rgba(245, 158, 11, 0.1)' : 'rgba(99, 102, 241, 0.08)',
-            border: hasNotices ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid rgba(99, 102, 241, 0.25)',
-            borderRadius: '8px',
-            marginBottom: '20px',
-            fontSize: '0.85rem',
-            color: '#fef3c7',
-          }}
-        >
-          <input
-            id="checkout-confirm-checkbox"
-            type="checkbox"
-            checked={acknowledged}
-            onChange={(e) => setAcknowledged(e.target.checked)}
-            style={{ width: '20px', height: '20px', accentColor: 'var(--accent-primary)', cursor: 'pointer', flexShrink: 0 }}
-          />
+        {/* Confirmation Checkbox */}
+        <div style={{ marginBottom: '20px' }}>
           <label
-            htmlFor="checkout-confirm-checkbox"
-            id="checkout-confirm-label"
-            style={{ cursor: 'pointer', margin: 0, userSelect: 'none' }}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '10px',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              color: 'var(--color-text-primary)',
+              lineHeight: 1.4,
+            }}
           >
-            <strong>Explicit Shopper Confirmation:</strong> I have reviewed the server-calculated totals, locked rates, and any inventory/price notices, and I authorize confirming this order.
+            <input
+              id="confirm-checkout-checkbox"
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => {
+                setAcknowledged(e.target.checked)
+                setError(null)
+              }}
+              style={{
+                accentColor: 'var(--color-secondary)',
+                width: '18px',
+                height: '18px',
+                marginTop: '2px',
+                flexShrink: 0,
+              }}
+            />
+            <span>
+              I have reviewed the items and prices and authorize PayPilot to confirm this order and place a 15-minute inventory reservation hold (Synthetic Demo Flow).
+            </span>
           </label>
         </div>
 
         {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setIsCheckoutOpen(false)}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </button>
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+          {hasNotices && (
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={handleRefreshPreview}
+              disabled={isSubmitting}
+            >
+              Re-price Cart
+            </button>
+          )}
+
           <button
             id="confirm-checkout-btn"
             type="button"
             className="btn btn-primary"
             onClick={handleConfirmCheckout}
-            disabled={isSubmitting || !acknowledged}
+            disabled={!acknowledged || isSubmitting}
+            style={{ padding: '10px 20px' }}
           >
-            {isSubmitting ? (
-              <span>Reserving Stock & Placing Order...</span>
-            ) : (
-              <>
-                <CheckCircle2 size={16} />
-                <span>Confirm Order & Reserve Stock</span>
-                <ArrowRight size={16} />
-              </>
-            )}
+            <span>{isSubmitting ? 'Placing Order...' : 'Confirm & Place Order'}</span>
+            <ArrowRight size={16} />
           </button>
         </div>
       </div>

@@ -10,6 +10,9 @@ jobs:
   backend:
     name: Backend Lint, Migrations & Tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     env:
       POSTGRES_ADMIN_URL: postgresql+asyncpg://postgres:postgres_ci_admin_password@127.0.0.1:5432/postgres
       DATABASE_URL: postgresql+asyncpg://paypilot:paypilot_test_password@127.0.0.1:5432/paypilot_dev

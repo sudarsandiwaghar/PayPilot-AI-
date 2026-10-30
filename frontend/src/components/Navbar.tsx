@@ -1,10 +1,21 @@
-import React from 'react'
-import { Sparkles, ShoppingBag, ShoppingCart, RefreshCw, Layers } from 'lucide-react'
+import React, { useState } from 'react'
+import {
+  Sparkles,
+  ShoppingBag,
+  ShoppingCart,
+  Receipt,
+  Scale,
+  Menu,
+  X,
+  RefreshCw,
+} from 'lucide-react'
 import { useSession } from '../context/useSession'
 
+import type { NavigationItem } from './SidebarNavigation'
+
 interface NavbarProps {
-  currentView: 'catalog' | 'agent'
-  onSelectView: (view: 'catalog' | 'agent') => void
+  currentView: NavigationItem
+  onSelectView: (view: NavigationItem) => void
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentView, onSelectView }) => {
@@ -15,8 +26,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onSelectView }) => 
     resetSession,
     isLoadingSession,
     comparisonIds,
-    setIsComparisonOpen,
   } = useSession()
+
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const itemCount = cart?.item_count || 0
   const sessionSnippet = session?.session_id
@@ -24,106 +36,180 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onSelectView }) => 
     : 'Connecting...'
 
   return (
-    <header className="navbar">
-      <div className="navbar-inner">
-        {/* Brand */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+    <>
+      <header className="mobile-header">
+        {/* Left: Hamburger + Brand */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            type="button"
+            className="btn btn-outline"
+            style={{ padding: '6px 8px', background: 'rgba(255, 255, 255, 0.1)', color: 'white', borderColor: 'rgba(255, 255, 255, 0.2)' }}
+            onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+            aria-label="Toggle Navigation Menu"
+          >
+            {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
+
           <a
             href="#home"
-            className="nav-brand"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              textDecoration: 'none',
+              color: 'var(--color-white)',
+              fontWeight: 800,
+            }}
             onClick={(e) => {
               e.preventDefault()
-              onSelectView('catalog')
+              onSelectView('dashboard')
             }}
           >
             <div
               style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '10px',
-                background: 'var(--gradient-brand)',
+                width: '30px',
+                height: '30px',
+                borderRadius: '8px',
+                backgroundColor: 'var(--color-secondary)',
+                color: 'var(--color-white)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 0 12px rgba(99, 102, 241, 0.5)',
               }}
             >
-              <Sparkles size={20} color="white" />
+              <Sparkles size={16} color="var(--color-white)" />
             </div>
-            <span>PayPilot</span>
-            <span className="brand-badge">AI Shopping</span>
+            <span style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-white)' }}>PayPilot AI</span>
           </a>
         </div>
 
-        {/* View Switcher Tabs */}
-        <div className="nav-tabs">
-          <button
-            type="button"
-            className={`nav-tab-btn ${currentView === 'catalog' ? 'active' : ''}`}
-            onClick={() => onSelectView('catalog')}
-          >
-            <ShoppingBag size={16} />
-            <span>Product Catalog</span>
-          </button>
-          <button
-            type="button"
-            className={`nav-tab-btn ${currentView === 'agent' ? 'active' : ''}`}
-            onClick={() => onSelectView('agent')}
-          >
-            <Sparkles size={16} />
-            <span>AI Assistant</span>
-          </button>
-        </div>
-
-        {/* Right Actions: Session, Compare Tray, Cart */}
-        <div className="nav-actions">
-          {/* Comparison Tray Indicator */}
+        {/* Right: Compare & Cart */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {comparisonIds.length > 0 && (
             <button
               type="button"
               className="btn btn-outline"
-              onClick={() => setIsComparisonOpen(true)}
-              style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+              onClick={() => onSelectView('compare')}
+              style={{
+                padding: '6px 10px',
+                fontSize: '0.8rem',
+                background: 'rgba(255, 255, 255, 0.1)',
+                color: 'white',
+                borderColor: 'rgba(255, 255, 255, 0.2)',
+              }}
             >
-              <Layers size={15} />
-              <span>Compare ({comparisonIds.length})</span>
+              <Scale size={15} />
+              <span>{comparisonIds.length}</span>
             </button>
           )}
 
-          {/* Secure Session Pill */}
-          <div className="session-pill" title={`Session ID: ${session?.session_id || 'None'}`}>
-            <span className="session-dot" />
-            <span>{isLoadingSession ? 'Starting session...' : `Session ${sessionSnippet}`}</span>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setIsCartOpen(true)}
+            style={{ padding: '6px 12px' }}
+            aria-label="View Shopping Cart"
+          >
+            <ShoppingCart size={16} />
+            {itemCount > 0 && <span>{itemCount}</span>}
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile Nav Drawer dropdown */}
+      {isMobileMenuOpen && (
+        <div className="mobile-nav-drawer open">
+          <button
+            type="button"
+            className={`sidebar-nav-btn ${currentView === 'dashboard' ? 'active' : ''}`}
+            onClick={() => {
+              onSelectView('dashboard')
+              setIsMobileMenuOpen(false)
+            }}
+          >
+            <Sparkles size={16} />
+            <span>Dashboard</span>
+          </button>
+
+          <button
+            type="button"
+            className={`sidebar-nav-btn ${currentView === 'agent' ? 'active' : ''}`}
+            onClick={() => {
+              onSelectView('agent')
+              setIsMobileMenuOpen(false)
+            }}
+          >
+            <Sparkles size={16} />
+            <span>AI Search Results</span>
+          </button>
+
+          <button
+            type="button"
+            className={`sidebar-nav-btn ${currentView === 'catalog' ? 'active' : ''}`}
+            onClick={() => {
+              onSelectView('catalog')
+              setIsMobileMenuOpen(false)
+            }}
+          >
+            <ShoppingBag size={16} />
+            <span>Product Catalog</span>
+          </button>
+
+          <button
+            type="button"
+            className={`sidebar-nav-btn ${currentView === 'compare' ? 'active' : ''}`}
+            onClick={() => {
+              onSelectView('compare')
+              setIsMobileMenuOpen(false)
+            }}
+          >
+            <Scale size={16} />
+            <span>Product Comparison</span>
+          </button>
+
+          <button
+            type="button"
+            className={`sidebar-nav-btn ${currentView === 'orders' ? 'active' : ''}`}
+            onClick={() => {
+              onSelectView('orders')
+              setIsMobileMenuOpen(false)
+            }}
+          >
+            <Receipt size={16} />
+            <span>Orders &amp; Spend</span>
+          </button>
+
+          <div
+            style={{
+              padding: '10px 14px',
+              borderTop: '1px solid var(--sidebar-border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '0.8rem',
+              color: 'var(--sidebar-text)',
+            }}
+          >
+            <span>{isLoadingSession ? 'Connecting...' : `Session: ${sessionSnippet}`}</span>
             <button
               type="button"
               onClick={() => resetSession()}
-              title="Reset session & generate fresh bearer token"
               style={{
                 background: 'none',
                 border: 'none',
-                color: 'var(--text-subtle)',
+                color: 'var(--sidebar-text)',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                padding: '2px',
+                gap: '4px',
               }}
             >
-              <RefreshCw size={13} />
+              <RefreshCw size={12} />
+              <span>Reset</span>
             </button>
           </div>
-
-          {/* Cart Button */}
-          <button
-            type="button"
-            className="btn btn-cart"
-            onClick={() => setIsCartOpen(true)}
-            aria-label="View Cart"
-          >
-            <ShoppingCart size={18} />
-            {itemCount > 0 && <span className="cart-badge">{itemCount}</span>}
-          </button>
         </div>
-      </div>
-    </header>
+      )}
+    </>
   )
 }

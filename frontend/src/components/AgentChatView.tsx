@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Sparkles,
-  Send,
+  Search,
   HelpCircle,
   ShieldCheck,
   ShoppingCart,
@@ -9,32 +9,45 @@ import {
   AlertTriangle,
   Scale,
   DollarSign,
-  Layers,
+  TrendingUp,
+  AlertCircle,
 } from 'lucide-react'
 import type { ShoppingAgentResponse } from '../api/types'
 import { api, ApiErrorResponse } from '../api/client'
 import { useSession } from '../context/useSession'
 import { formatCurrency } from '../utils/currency'
 
-const SAMPLE_PROMPTS = [
-  'Noise-canceling headphones for air travel under $400',
-  'Mechanical keyboard with hot-swappable switches under $150',
-  'Lightweight laptop with 16GB RAM for programming under $1500',
-  'Vague query test: recommend something good',
-  'Under-budget test: gaming laptop under $10',
-]
+interface AgentChatViewProps {
+  initialQuery?: string
+  onQuerySubmitted?: (query: string) => void
+}
 
-export const AgentChatView: React.FC = () => {
-  const { session, token, addToCart, isCartLoading } = useSession()
-  const [query, setQuery] = useState('')
+export const AgentChatView: React.FC<AgentChatViewProps> = ({
+  initialQuery,
+  onQuerySubmitted,
+}) => {
+  const { session, token, addToCart, comparisonIds, toggleCompareProduct, setIsComparisonOpen } =
+    useSession()
+  const [query, setQuery] = useState(initialQuery || '')
+  const queryRef = useRef(query)
+  useEffect(() => {
+    queryRef.current = query
+  }, [query])
+  const [inlineError, setInlineError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [response, setResponse] = useState<ShoppingAgentResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [addedIds, setAddedIds] = useState<string[]>([])
+  const submittedQueryRef = useRef<string | null>(null)
 
-  const handleSubmit = async (qText?: string) => {
-    const textToSubmit = qText || query
-    if (!textToSubmit.trim()) return
+  const handleSubmit = useCallback(async (qText?: string) => {
+    const rawText = qText !== undefined ? qText : queryRef.current
+    const textToSubmit = rawText.trim()
+    if (!textToSubmit) {
+      setInlineError('Please enter a product request before searching with AI.')
+      return
+    }
+    setInlineError(null)
 
     if (!session?.session_id || !token) {
       setError('Active shopping session is required. Please wait for session initialization.')
@@ -44,8 +57,12 @@ export const AgentChatView: React.FC = () => {
     try {
       setIsLoading(true)
       setError(null)
+      submittedQueryRef.current = textToSubmit
+      if (onQuerySubmitted) {
+        onQuerySubmitted(textToSubmit)
+      }
       const res = await api.queryAgent(session.session_id, token, {
-        query: textToSubmit.trim(),
+        query: textToSubmit,
       })
       setResponse(res)
     } catch (err) {
@@ -63,7 +80,23 @@ export const AgentChatView: React.FC = () => {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [session, token, onQuerySubmitted])
+
+  // Auto-submit initialQuery when provided (e.g. from Dashboard or URL hash navigation)
+  useEffect(() => {
+    const trimmed = initialQuery?.trim()
+    if (
+      trimmed &&
+      trimmed !== submittedQueryRef.current &&
+      session?.session_id &&
+      token
+    ) {
+      submittedQueryRef.current = trimmed
+      setQuery(trimmed)
+      setInlineError(null)
+      void handleSubmit(trimmed)
+    }
+  }, [initialQuery, session?.session_id, token, handleSubmit])
 
   const handleAddToCart = async (productId: string) => {
     const ok = await addToCart(productId, 1)
@@ -76,137 +109,250 @@ export const AgentChatView: React.FC = () => {
   }
 
   return (
-    <div className="agent-chat-wrap">
-      {/* Hero Banner */}
-      <div className="glass-panel agent-hero">
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '4px 14px', borderRadius: '999px', background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.3)', color: 'var(--text-accent)', fontSize: '0.8rem', fontWeight: 600, marginBottom: '14px' }}>
-          <Sparkles size={14} />
-          <span>Grounded Catalog Intelligence</span>
-        </div>
-        <h1>AI Shopping Assistant & Decision Engine</h1>
-        <p>
-          State your requirements, budget ceiling, or preferred specs in plain English. The backend decision engine filters inventory, scores candidates deterministically, and synthesizes grounded explanations strictly from catalog evidence.
-        </p>
+    <div className="assistant-container">
+      {/* Breadcrumb Header */}
+      <div className="breadcrumb-row">
+        <span>DASHBOARD</span>
+        <span style={{ opacity: 0.6 }}>&gt;</span>
+        <span style={{ color: 'var(--color-secondary)' }}>AI SEARCH RESULTS</span>
+      </div>
 
-        {/* Query Input Box */}
+      {/* Top Header */}
+      <div>
+        <h1 style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--color-text-primary)', marginBottom: '4px' }}>
+          AI Search Results
+        </h1>
+        <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.92rem' }}>
+          Dynamic AI product discovery, constraint validation, and deterministic knapsack budget optimization.
+        </p>
+      </div>
+
+      {/* Budget Overview Card */}
+      <div className="budget-overview-card">
+        <div className="budget-stats-group">
+          <div className="budget-stat-item">
+            <span className="budget-stat-label">Budget Ceiling (Per Query)</span>
+            <span className="budget-stat-value">
+              {response?.budget_summary?.budget_minor
+                ? formatCurrency(response.budget_summary.budget_minor, response.budget_summary.currency)
+                : 'Not Set (Unconstrained)'}
+            </span>
+          </div>
+
+          {response?.budget_summary && (
+            <>
+              <div style={{ height: '36px', width: '1px', backgroundColor: 'var(--color-border)' }} />
+              <div className="budget-stat-item">
+                <span className="budget-stat-label">Allocated (Knapsack)</span>
+                <span style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-success)' }}>
+                  {formatCurrency(response.budget_summary.allocated_minor, response.budget_summary.currency)}
+                </span>
+              </div>
+              <div className="budget-stat-item">
+                <span className="budget-stat-label">Remaining</span>
+                <span style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-secondary)' }}>
+                  {formatCurrency(response.budget_summary.remaining_minor, response.budget_summary.currency)}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="badge badge-purple">
+            <TrendingUp size={12} />
+            <span>Deterministic Knapsack Active</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Prominent Natural-Language Dynamic Search Bar */}
+      <div className="search-prompt-bar">
         <form
-          className="agent-query-box"
+          className="prompt-input-row"
           onSubmit={(e) => {
             e.preventDefault()
             handleSubmit()
           }}
         >
+          <Sparkles size={18} color="var(--color-secondary)" style={{ flexShrink: 0 }} />
           <input
+            id="agent-query-input"
             type="text"
-            className="agent-query-input"
-            placeholder="e.g., Wireless noise-canceling headphones for long flights under $400..."
+            className="prompt-input-field"
+            placeholder="Type any product request in your own words (e.g. noise-canceling headphones under $350)..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              if (inlineError) setInlineError(null)
+            }}
             disabled={isLoading}
           />
-          <button type="submit" className="btn btn-primary" disabled={isLoading || !query.trim()}>
-            <Send size={16} />
-            <span>{isLoading ? 'Reasoning...' : 'Ask Assistant'}</span>
+          <button
+            id="agent-query-submit-btn"
+            type="submit"
+            className="btn btn-primary"
+            disabled={isLoading}
+            style={{ padding: '9px 18px', borderRadius: '8px', fontSize: '0.86rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Search size={15} />
+            <span>{isLoading ? 'Searching...' : 'Search with AI'}</span>
           </button>
         </form>
 
-        {/* Quick Sample Prompts */}
-        <div className="quick-prompts">
-          {SAMPLE_PROMPTS.map((prompt) => (
-            <button
-              key={prompt}
-              type="button"
-              className="prompt-chip"
-              onClick={() => {
-                setQuery(prompt)
-                handleSubmit(prompt)
-              }}
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
+        {/* Inline Validation Error */}
+        {inlineError && (
+          <div
+            id="agent-inline-error"
+            className="search-inline-error"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              marginTop: '8px',
+              color: 'var(--color-error)',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+            }}
+          >
+            <AlertCircle size={14} />
+            <span>{inlineError}</span>
+          </div>
+        )}
       </div>
 
-      {/* Error Banner */}
+      {/* Error Alert */}
       {error && (
         <div className="alert alert-error">
           <AlertTriangle size={18} />
           <div>
-            <div style={{ fontWeight: 600, marginBottom: '2px' }}>AI Shopping Assistant Notice</div>
+            <div style={{ fontWeight: 700, marginBottom: '2px' }}>Assistant Notice</div>
             <div>{error}</div>
           </div>
         </div>
       )}
 
-      {/* Results Area */}
+      {/* Loading State Banner */}
+      {isLoading && (
+        <div
+          className="matte-card"
+          style={{
+            padding: '36px 20px',
+            textAlign: 'center',
+            backgroundColor: 'var(--color-neutral)',
+            border: '1px solid var(--color-border)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '12px',
+          }}
+        >
+          <div
+            style={{
+              width: '36px',
+              height: '36px',
+              border: '3px solid var(--color-tertiary)',
+              borderTopColor: 'var(--color-secondary)',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite',
+            }}
+          />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--color-text-primary)' }}>
+              Searching catalog with AI reasoning...
+            </div>
+            <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+              Parsing constraints, checking stock availability, and calculating budget knapsack.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Initial Empty State Before Any Search */}
+      {!isLoading && !response && !error && (
+        <div
+          className="matte-card"
+          style={{
+            padding: '40px 24px',
+            textAlign: 'center',
+            borderRadius: '14px',
+            backgroundColor: 'var(--color-neutral)',
+            border: '1px solid var(--color-border)',
+            maxWidth: '640px',
+            margin: '0 auto',
+          }}
+        >
+          <Sparkles size={32} color="var(--color-secondary)" style={{ margin: '0 auto 12px' }} />
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '8px' }}>
+            Enter Your Product Request
+          </h3>
+          <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', margin: '0 0 16px' }}>
+            Type any product request in your own words above (e.g. noise-canceling headphones under $300, mechanical keyboard with hot-swappable switches).
+          </p>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--color-secondary)', fontWeight: 600 }}>
+            <ShieldCheck size={14} />
+            <span>Zero canned searches &bull; Live deterministic decision engine</span>
+          </div>
+        </div>
+      )}
+
+      {/* Results / Dialogue Area */}
       {response && (
-        <div className="agent-results-box">
-          {/* Parsed Intent Summary */}
-          <div className="glass-panel intent-summary-card">
-            <div>
-              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-subtle)', fontWeight: 600, marginBottom: '4px' }}>
-                Extracted Constraints & Intent
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Extracted Intent & Constraints Card */}
+          <div className="matte-card" style={{ padding: '20px 24px' }}>
+            <div className="intent-badge-row">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="badge badge-purple">Parsed Intent</span>
+                <span style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--color-text-primary)' }}>
+                  &ldquo;{response.intent.raw_query}&rdquo;
+                </span>
               </div>
-              <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '8px' }}>
-                &ldquo;{response.intent.raw_query}&rdquo;
-              </div>
-              <div className="intent-meta-tags">
-                {response.intent.constraints.category && (
-                  <span className="meta-pill">Category: {response.intent.constraints.category}</span>
-                )}
-                {response.intent.constraints.budget_minor !== null && (
-                  <span className="meta-pill">
-                    Budget Ceiling: {formatCurrency(response.intent.constraints.budget_minor, response.intent.constraints.currency)}
+
+              {response.budget_summary && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                  <DollarSign size={14} color="var(--color-success)" />
+                  <span>
+                    Knapsack Fits Budget: <strong>{response.budget_summary.fits_within_budget ? 'Yes' : 'No'}</strong>
                   </span>
-                )}
-                {response.intent.constraints.required_features.map((feat) => (
-                  <span key={feat} className="meta-pill">
-                    Required: {feat}
-                  </span>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
 
-            {/* Budget Optimization Summary */}
-            {response.budget_summary && response.budget_summary.budget_minor !== null && (
-              <div
-                style={{
-                  background: 'rgba(15, 23, 42, 0.6)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '10px',
-                  padding: '10px 16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '14px',
-                }}
-              >
-                <DollarSign size={20} color="var(--accent-emerald)" />
-                <div style={{ fontSize: '0.8rem' }}>
-                  <div style={{ color: 'var(--text-muted)' }}>Budget Knapsack</div>
-                  <div style={{ fontWeight: 700, color: 'var(--text-main)' }}>
-                    Allocated: {formatCurrency(response.budget_summary.allocated_minor, response.budget_summary.currency)} / {formatCurrency(response.budget_summary.budget_minor, response.budget_summary.currency)}
-                  </div>
-                </div>
-              </div>
-            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
+              {response.intent.constraints.category && (
+                <span className="badge badge-purple">
+                  Category: {response.intent.constraints.category}
+                </span>
+              )}
+              {response.intent.constraints.budget_minor !== null && (
+                <span className="badge badge-purple">
+                  Ceiling: {formatCurrency(response.intent.constraints.budget_minor, response.intent.constraints.currency)}
+                </span>
+              )}
+              {response.intent.constraints.required_features.map((feat) => (
+                <span key={feat} className="badge badge-purple">
+                  Spec: {feat}
+                </span>
+              ))}
+            </div>
           </div>
 
           {/* Ambiguity Clarification Questions Banner */}
           {response.clarification_questions.length > 0 && (
-            <div className="clarification-banner">
-              <div className="clarification-title">
+            <div id="agent-clarification-banner" className="alert alert-warning" style={{ flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}>
                 <HelpCircle size={18} />
                 <span>
                   {response.intent.ambiguity_detected
-                    ? 'Clarification Needed: Constraints Ambiguous'
-                    : 'Refinement Suggestions'}
+                    ? 'Clarification Needed (Zero Hallucinations Policy)'
+                    : 'Refinement Options'}
                 </span>
               </div>
-              <p style={{ fontSize: '0.875rem', color: '#fef3c7' }}>
-                To avoid hallucinating or making assumptions, the decision layer requires a bit more detail:
+              <p style={{ fontSize: '0.85rem', margin: 0 }}>
+                The decision engine detected ambiguity or restrictive constraints:
               </p>
-              <ul style={{ paddingLeft: '20px', fontSize: '0.875rem', color: '#fde68a' }}>
+              <ul style={{ paddingLeft: '20px', fontSize: '0.85rem', margin: 0 }}>
                 {response.clarification_questions.map((q, idx) => (
                   <li key={idx} style={{ marginBottom: '4px' }}>
                     {q}
@@ -216,185 +362,180 @@ export const AgentChatView: React.FC = () => {
             </div>
           )}
 
-          {/* Recommendations List */}
+          {/* Recommended Products Grid */}
           {response.recommendations.length > 0 ? (
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px', fontSize: '1.1rem', fontWeight: 700 }}>
-                <Sparkles size={18} color="var(--accent-primary)" />
-                <span>Ranked Catalog Recommendations</span>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 400 }}>
-                  ({response.recommendations.length} matched)
-                </span>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '14px',
+                }}
+              >
+                <h2 style={{ fontSize: '1.15rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-primary)' }}>
+                  <Sparkles size={18} color="var(--color-secondary)" />
+                  <span>Ranked Recommendations ({response.recommendations.length})</span>
+                </h2>
+
+                {comparisonIds.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => setIsComparisonOpen(true)}
+                    style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                  >
+                    <Scale size={14} />
+                    <span>View Comparison ({comparisonIds.length})</span>
+                  </button>
+                )}
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {response.recommendations.map((rec) => {
+                {response.recommendations.map((rec, index) => {
                   const isAdded = addedIds.includes(rec.product_id)
+                  const isCompared = comparisonIds.includes(rec.product_id)
                   const matchPct = Math.round(rec.match_score * 100)
 
                   return (
-                    <div key={rec.product_id} className="glass-panel recommendation-card">
-                      <div className="recommendation-score-pill">
-                        {matchPct}% Match Score
-                      </div>
+                    <div
+                      key={rec.product_id}
+                      className="matte-card"
+                      style={{
+                        padding: '20px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '14px',
+                        backgroundColor: 'var(--color-neutral)',
+                        border: '1px solid var(--color-border)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          justifyContent: 'space-between',
+                          gap: '16px',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: '260px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                            <span
+                              className="badge badge-dark"
+                              style={{ backgroundColor: index === 0 ? 'var(--color-primary)' : 'var(--color-success)', color: 'var(--color-neutral)' }}
+                            >
+                              {index === 0 ? 'BEST MATCH • ' : ''}{matchPct}% Match
+                            </span>
+                            <span style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                              {rec.brand || 'PayPilot'} &bull; {rec.category}
+                            </span>
+                          </div>
 
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }}>
-                          <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                          <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '8px' }}>
                             {rec.name}
                           </h3>
-                          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                            by {rec.brand || 'PayPilot'}
-                          </span>
-                        </div>
 
-                        {/* Price & Category */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-                          <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                            {formatCurrency(rec.price_minor, rec.currency)}
-                          </span>
-                          <span className="card-category-badge" style={{ position: 'static' }}>
-                            {rec.category}
-                          </span>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--accent-emerald)' }}>
-                            {rec.available_stock} in stock
-                          </span>
-                        </div>
-
-                        {/* Grounded Explanation Quote */}
-                        <div className="explanation-quote">
-                          <strong>Grounded Assessment:</strong> {rec.explanation}
-                        </div>
-
-                        {/* Matched Features */}
-                        {rec.matched_features.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '8px 0' }}>
-                            {rec.matched_features.map((mf) => (
-                              <span
-                                key={mf}
-                                style={{
-                                  background: 'rgba(6, 182, 212, 0.1)',
-                                  border: '1px solid rgba(6, 182, 212, 0.25)',
-                                  color: 'var(--accent-cyan)',
-                                  fontSize: '0.72rem',
-                                  padding: '2px 8px',
-                                  borderRadius: '4px',
-                                }}
-                              >
-                                ✓ {mf}
-                              </span>
-                            ))}
+                          {/* AI Grounded Explanation Box */}
+                          <div className="ai-recommendation-box" style={{ marginTop: '4px' }}>
+                            <div className="ai-recommendation-label">
+                              <Sparkles size={11} color="var(--color-secondary)" />
+                              <span>WHY AI RECOMMENDED</span>
+                            </div>
+                            <p className="ai-recommendation-text">{rec.explanation}</p>
                           </div>
-                        )}
+                        </div>
 
-                        {/* Verified Evidence Provenance */}
-                        {rec.source_evidence.length > 0 && (
-                          <div className="source-evidence-row">
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <ShieldCheck size={13} color="var(--accent-emerald)" />
-                              Evidence:
-                            </span>
-                            {rec.source_evidence.map((src, i) => (
-                              <span key={i} className="source-badge">
-                                {String(src.source_name)} ({String(src.source_type)})
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Add to Cart Button */}
-                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                        <button
-                          type="button"
-                          className={`btn ${isAdded ? 'btn-secondary' : 'btn-primary'}`}
-                          onClick={() => handleAddToCart(rec.product_id)}
-                          disabled={isCartLoading || rec.available_stock <= 0}
-                          style={{ minWidth: '140px' }}
+                        {/* Price & Action Box */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'flex-end',
+                            gap: '10px',
+                            minWidth: '160px',
+                          }}
                         >
-                          {isAdded ? (
-                            <>
-                              <Check size={16} />
-                              <span>Added!</span>
-                            </>
-                          ) : (
-                            <>
-                              <ShoppingCart size={16} />
-                              <span>Add to Cart</span>
-                            </>
-                          )}
-                        </button>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+                              {formatCurrency(rec.price_minor, rec.currency)}
+                            </div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--color-success)', fontWeight: 600 }}>
+                              {rec.available_stock} units available
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              className={`btn ${isCompared ? 'btn-secondary' : 'btn-outline'}`}
+                              onClick={() => toggleCompareProduct(rec.product_id)}
+                              style={{ padding: '8px 12px', fontSize: '0.8rem' }}
+                            >
+                              <Scale size={14} />
+                              <span>{isCompared ? 'Compared' : 'Compare'}</span>
+                            </button>
+
+                            <button
+                              id="add-rec-cart-btn"
+                              type="button"
+                              className="btn btn-primary"
+                              onClick={() => handleAddToCart(rec.product_id)}
+                              style={{ padding: '8px 16px', fontSize: '0.82rem' }}
+                            >
+                              {isAdded ? <Check size={14} /> : <ShoppingCart size={14} />}
+                              <span>{isAdded ? 'Added' : 'Add to Cart'}</span>
+                            </button>
+                          </div>
+                        </div>
                       </div>
+
+                      {/* Source Evidence Pills */}
+                      {rec.source_evidence && rec.source_evidence.length > 0 && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            paddingTop: '10px',
+                            borderTop: '1px solid var(--color-border)',
+                            fontSize: '0.75rem',
+                            color: 'var(--color-text-secondary)',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <ShieldCheck size={14} color="var(--color-secondary)" />
+                          <span style={{ fontWeight: 600 }}>Catalog Sources:</span>
+                          {rec.source_evidence.map((s, idx) => (
+                            <span key={idx} className="badge badge-purple" style={{ fontSize: '0.7rem' }}>
+                              {String(s.source_name || 'Demo Catalog Source')}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
               </div>
             </div>
           ) : (
-            /* No Recommendations (Empty or Ambiguous) */
-            !response.intent.ambiguity_detected && (
-              <div className="glass-panel" style={{ textAlign: 'center', padding: '40px 20px' }}>
-                <Scale size={36} color="var(--text-subtle)" style={{ margin: '0 auto 12px' }} />
-                <h3 style={{ fontSize: '1.1rem', marginBottom: '6px' }}>Zero Matching Products Found</h3>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', maxWidth: '440px', margin: '0 auto' }}>
-                  The backend database strictly enforced your hard price ceiling and category constraints. No items were hallucinated.
-                </p>
-              </div>
-            )
-          )}
-
-          {/* Side-by-Side Comparison from Agent */}
-          {response.comparison.length > 1 && (
-            <div className="glass-panel" style={{ padding: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontWeight: 700 }}>
-                <Layers size={18} color="var(--accent-secondary)" />
-                <span>Side-by-Side Candidate Comparison</span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${response.comparison.length}, 1fr)`, gap: '16px', overflowX: 'auto' }}>
-                {response.comparison.map((comp) => (
-                  <div
-                    key={comp.product_id}
-                    style={{
-                      background: 'rgba(15, 23, 42, 0.5)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: '10px',
-                      padding: '16px',
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, color: 'var(--text-main)', marginBottom: '4px' }}>
-                      {comp.name}
-                    </div>
-                    <div style={{ color: 'var(--accent-cyan)', fontWeight: 800, marginBottom: '12px' }}>
-                      {formatCurrency(comp.price_minor, comp.currency)}
-                    </div>
-
-                    <div style={{ marginBottom: '10px' }}>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--accent-emerald)', fontWeight: 600, marginBottom: '4px' }}>
-                        Strengths:
-                      </div>
-                      <ul style={{ paddingLeft: '16px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        {comp.pros.map((p, i) => (
-                          <li key={i}>{p}</li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    {comp.cons.length > 0 && (
-                      <div>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--accent-amber)', fontWeight: 600, marginBottom: '4px' }}>
-                          Trade-offs:
-                        </div>
-                        <ul style={{ paddingLeft: '16px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                          {comp.cons.map((c, i) => (
-                            <li key={i}>{c}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+            <div
+              id="agent-no-results"
+              className="matte-card"
+              style={{
+                padding: '36px 20px',
+                textAlign: 'center',
+                borderRadius: '14px',
+                backgroundColor: 'var(--color-neutral)',
+                border: '1px solid var(--color-border)',
+              }}
+            >
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '8px' }}>
+                No catalog items match current constraints
+              </h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', maxWidth: '440px', margin: '0 auto' }}>
+                Try adjusting your search criteria, broadening required specifications, or increasing your budget ceiling above.
+              </p>
             </div>
           )}
         </div>

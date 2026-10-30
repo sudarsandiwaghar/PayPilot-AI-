@@ -65,6 +65,7 @@ class CartService:
 
         for item in cart.items:
             product_name = item.product.name if item.product else "Unknown Product"
+            product_image_url = item.product.image_url if item.product else None
             currency = item.currency
             line_total = item.quantity * item.unit_price_minor
             subtotal += line_total
@@ -75,6 +76,7 @@ class CartService:
                     id=item.id,
                     product_id=item.product_id,
                     product_name=product_name,
+                    product_image_url=product_image_url,
                     quantity=item.quantity,
                     unit_price_minor=item.unit_price_minor,
                     currency=currency,

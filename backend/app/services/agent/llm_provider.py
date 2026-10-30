@@ -235,7 +235,11 @@ class GeminiLLMProvider:
 
     async def parse_intent(self, request: ShoppingAgentRequest) -> ShoppingIntent:
         """Call Gemini API to extract structured intent from query."""
-        url = f"{self.base_url}/models/{self.model}:generateContent?key={self.api_key}"
+        url = f"{self.base_url}/models/{self.model}:generateContent"
+        headers = {
+            "x-goog-api-key": self.api_key,
+            "Content-Type": "application/json",
+        }
         prompt = (
             f"You are PayPilot Shopping Assistant. Extract structured shopping constraints from this user query:\n"
             f"Query: {request.query}\n"
@@ -249,7 +253,7 @@ class GeminiLLMProvider:
         }
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                res = await client.post(url, json=payload)
+                res = await client.post(url, json=payload, headers=headers)
                 if res.status_code == 200:
                     data = res.json()
                     candidates = data.get("candidates", [])
@@ -272,8 +276,13 @@ class GeminiLLMProvider:
                             ambiguity_detected=is_amb,
                             clarification_questions=parsed.get("clarification_questions", []),
                         )
+                else:
+                    logger.warning("Gemini API returned status %s: %s", res.status_code, res.text[:200])
         except Exception as exc:
-            logger.warning("Gemini intent parsing failed, falling back to deterministic extraction: %s", exc)
+            err_msg = str(exc)
+            if self.api_key and self.api_key in err_msg:
+                err_msg = err_msg.replace(self.api_key, "[REDACTED_API_KEY]")
+            logger.warning("Gemini intent parsing failed, falling back to deterministic extraction: %s", err_msg)
 
         # Fallback to offline deterministic parsing if live call fails
         mock = MockLLMProvider()

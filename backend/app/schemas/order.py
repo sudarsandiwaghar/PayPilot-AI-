@@ -18,6 +18,7 @@ class CheckoutLineItem(BaseModel):
 
     product_id: UUID
     product_name: str
+    product_image_url: str | None = None
     quantity: int
     unit_price_minor: int
     currency: str
@@ -71,6 +72,7 @@ class OrderItemOut(BaseModel):
     id: UUID
     product_id: UUID
     product_name: str
+    product_image_url: str | None = None
     quantity: int
     unit_price_minor: int
     currency: str

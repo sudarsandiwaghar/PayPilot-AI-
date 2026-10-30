@@ -102,6 +102,7 @@ class CheckoutService:
                 CheckoutLineItem(
                     product_id=product.id,
                     product_name=product.name,
+                    product_image_url=product.image_url,
                     quantity=item.quantity,
                     unit_price_minor=live_price,
                     currency=currency,

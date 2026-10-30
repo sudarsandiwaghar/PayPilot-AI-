@@ -20,7 +20,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.agent.tools import ALLOWLISTED_TOOLS, execute_tool
+from app.services.agent.tools import ALLOWLISTED_TOOLS
 from app.utils.exceptions import ToolExecutionForbidden
 
 # ── Request Validation Envelope Tests ─────────────────────────────
@@ -109,16 +109,36 @@ async def test_agent_gemini_without_api_key_returns_clear_error(
 
 # ── Tool Allowlisting Tests ───────────────────────────────────────
 
+def test_tool_registry_reconciliation() -> None:
+    """Verify tool_registry.py ALLOWED_TOOLS matches tools.py ALLOWLISTED_TOOLS and all are read-only."""
+    from app.agents.tool_registry import ALLOWED_TOOLS
+
+    assert set(ALLOWED_TOOLS.keys()) == ALLOWLISTED_TOOLS
+    assert frozenset({
+        "search_products",
+        "get_product_detail",
+        "compare_products",
+        "optimize_budget",
+    }) == ALLOWLISTED_TOOLS
+    for tool_name, meta in ALLOWED_TOOLS.items():
+        assert callable(meta["fn"])
+        assert isinstance(meta["description"], str)
+        assert meta["read_only"] is True, f"Tool {tool_name} must be strictly read-only"
+
+
 @pytest.mark.asyncio
 async def test_tool_allowlisting_strict_enforcement(db_session: AsyncSession) -> None:
     """Verify tool allowlist permits only read-only tools and forbids state changes."""
+    from app.agents.tool_registry import ALLOWED_TOOLS
+    from app.agents.tool_registry import execute_tool as reg_execute_tool
+
     assert "search_products" in ALLOWLISTED_TOOLS
     assert "get_product_detail" in ALLOWLISTED_TOOLS
     assert "compare_products" in ALLOWLISTED_TOOLS
     assert "optimize_budget" in ALLOWLISTED_TOOLS
 
-    # Permitted tool executes cleanly
-    res = await execute_tool("search_products", {"limit": 2}, db_session)
+    # Permitted tool executes cleanly via registry re-export
+    res = await reg_execute_tool("search_products", {"limit": 2}, db_session)
     assert isinstance(res, list)
 
     # Disallowed tools raise ToolExecutionForbidden immediately
@@ -130,13 +150,41 @@ async def test_tool_allowlisting_strict_enforcement(db_session: AsyncSession) ->
         "confirm_checkout",
         "delete_user",
         "update_product_price",
+        "transfer_funds",
+        "arbitrary_exec",
     ]
     for forbidden in forbidden_tools:
+        assert forbidden not in ALLOWED_TOOLS
         with pytest.raises(ToolExecutionForbidden) as exc_info:
-            await execute_tool(forbidden, {}, db_session)
+            await reg_execute_tool(forbidden, {}, db_session)
         assert forbidden in str(exc_info.value)
         assert exc_info.value.code == "TOOL_EXECUTION_FORBIDDEN"
         assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_gemini_fallback_and_secret_safe_logging(caplog: pytest.LogCaptureFixture) -> None:
+    """Verify GeminiLLMProvider falls back gracefully on network error and never logs API key."""
+    import logging
+
+    from app.schemas.agent import ShoppingAgentRequest
+    from app.services.agent.llm_provider import GeminiLLMProvider
+
+    secret_key = "AIzaSySecretTestKey123456789"
+    # Point base_url to an unreachable port to trigger connection error
+    provider = GeminiLLMProvider(api_key=secret_key, base_url="http://127.0.0.1:9")
+
+    req = ShoppingAgentRequest(query="Find wireless headphones under $200")
+    with caplog.at_level(logging.WARNING):
+        intent = await provider.parse_intent(req)
+
+    # Must fall back gracefully to deterministic intent
+    assert intent is not None
+    assert intent.constraints.category == "Audio"
+    assert intent.constraints.budget_minor == 20000
+
+    # Ensure the secret key was never written to logs
+    assert secret_key not in caplog.text
 
 
 # ── End-to-End Decision Layer Tests with Mock Provider ────────────
@@ -298,3 +346,51 @@ async def test_agent_session_protection(client: AsyncClient) -> None:
     )
     assert resp.status_code == 404
     assert resp.json()["errors"][0]["code"] == "SESSION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_agent_dynamic_user_query_trimming(
+    client: AsyncClient, active_session: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """User-entered query with padding whitespace is trimmed and processed correctly."""
+    session_id = active_session["session_id"]
+    headers = active_session["headers"]
+
+    from app import config
+
+    monkeypatch.setattr(config.get_settings(), "llm_provider", "mock")
+
+    # Send dynamic user query with extra leading and trailing whitespace
+    resp = await client.post(
+        f"/api/v1/sessions/{session_id}/agent/recommend",
+        headers=headers,
+        json={"query": "   noise-canceling headphones under $400   "},
+    )
+    assert resp.status_code == 200
+    body = resp.json()["data"]
+
+    # Raw query in intent is cleanly trimmed
+    assert body["intent"]["raw_query"] == "noise-canceling headphones under $400"
+    assert body["intent"]["constraints"]["category"] == "Audio"
+    assert body["intent"]["constraints"]["budget_minor"] == 40000
+    assert len(body["recommendations"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_agent_empty_query_rejected(
+    client: AsyncClient, active_session: dict
+) -> None:
+    """Empty string query violates min_length=1 and returns standard validation error."""
+    session_id = active_session["session_id"]
+    headers = active_session["headers"]
+
+    resp = await client.post(
+        f"/api/v1/sessions/{session_id}/agent/recommend",
+        headers=headers,
+        json={"query": ""},
+    )
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["data"] is None
+    assert body["errors"][0]["code"] == "VALIDATION_ERROR"
+    assert "query" in str(body["errors"][0]["field"])

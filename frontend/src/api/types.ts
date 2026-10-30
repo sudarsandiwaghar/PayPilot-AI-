@@ -123,6 +123,7 @@ export interface CartData {
 export interface CheckoutLineItem {
   product_id: string
   product_name: string
+  product_image_url?: string | null
   quantity: number
   unit_price_minor: number
   currency: string
@@ -165,6 +166,7 @@ export interface OrderItem {
   id: string
   product_id: string
   product_name: string
+  product_image_url?: string | null
   quantity: number
   unit_price_minor: number
   currency: string

@@ -326,4 +326,22 @@ export const api = {
     }
     return order
   },
+
+  async listSessionOrders(sessionId: string, token: string): Promise<OrderData[]> {
+    const orders = await request<OrderData[]>(
+      `/api/v1/sessions/${sessionId}/orders`,
+      { method: 'GET' },
+      token
+    )
+    if (Array.isArray(orders)) {
+      orders.forEach((order) => {
+        if (order.items) {
+          order.items.forEach((item) => {
+            item.price_minor = item.unit_price_minor
+          })
+        }
+      })
+    }
+    return orders
+  },
 }

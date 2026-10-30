@@ -1,8 +1,9 @@
 import React from 'react'
-import { X, Trash2, Plus, Minus, ArrowRight, ShoppingBag, ShieldCheck } from 'lucide-react'
+import { X, Trash2, Plus, Minus, ArrowRight, ShoppingCart, ShieldCheck } from 'lucide-react'
 import { useSession } from '../context/useSession'
 import { api } from '../api/client'
 import { formatCurrency } from '../utils/currency'
+import { getProductImageUrl } from '../utils/productImages'
 
 export const CartDrawer: React.FC = () => {
   const {
@@ -37,154 +38,200 @@ export const CartDrawer: React.FC = () => {
   }
 
   return (
-    <div className="modal-backdrop" onClick={() => setIsCartOpen(false)}>
-      <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="cart-drawer-backdrop" onClick={() => setIsCartOpen(false)}>
+      <div className="cart-drawer-panel" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="drawer-header">
+        <div
+          style={{
+            padding: '18px 20px',
+            borderBottom: '1px solid var(--color-border)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: 'var(--color-neutral)',
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ShoppingBag size={20} color="var(--accent-primary)" />
-            <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Your Shopping Cart</h2>
+            <ShoppingCart size={18} color="var(--color-secondary)" />
+            <h2 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0, color: 'var(--color-text-primary)' }}>
+              Shopping Cart
+            </h2>
             {cart && (
-              <span className="cart-badge" style={{ position: 'static' }}>
+              <span className="badge badge-purple" style={{ fontSize: '0.72rem' }}>
                 v{cart.version}
               </span>
             )}
           </div>
           <button
             type="button"
-            className="drawer-close-btn"
             onClick={() => setIsCartOpen(false)}
-            aria-label="Close cart"
+            aria-label="Close shopping cart"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              padding: '4px',
+            }}
           >
             <X size={20} />
           </button>
         </div>
 
-        {/* Items List */}
-        <div className="drawer-body">
+        {/* Body Items Scroll */}
+        <div className="cart-items-scroll">
           {items.length === 0 ? (
-            <div className="empty-cart-state">
-              <ShoppingBag size={48} className="empty-cart-icon" />
-              <p style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px' }}>
+            <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--color-text-secondary)' }}>
+              <ShoppingCart size={40} color="var(--color-secondary)" style={{ margin: '0 auto 12px' }} />
+              <p style={{ fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '4px' }}>
                 Your cart is empty
               </p>
-              <p style={{ fontSize: '0.85rem' }}>
-                Browse our catalog or query the AI assistant to add items.
+              <p style={{ fontSize: '0.82rem', margin: 0 }}>
+                Explore products or ask the Shopping Assistant to add items to your cart.
               </p>
             </div>
           ) : (
             items.map((item) => (
               <div key={item.id} className="cart-item-row">
                 <img
-                  src={
-                    item.product_image_url ||
-                    'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=200'
-                  }
+                  src={getProductImageUrl(item.product_image_url, item.product_name)}
                   alt={item.product_name}
-                  className="cart-item-img"
+                  style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '8px',
+                    objectFit: 'contain',
+                    backgroundColor: 'var(--color-neutral)',
+                    border: '1px solid var(--color-border)',
+                    padding: '4px',
+                  }}
                 />
 
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: '0.875rem',
-                      fontWeight: 600,
-                      color: 'var(--text-main)',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                    title={item.product_name}
-                  >
-                    {item.product_name}
-                  </div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '2px 0 8px' }}>
-                    {formatCurrency(item.unit_price_minor, item.currency || cart?.currency)} each
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                      {item.product_name}
+                    </span>
+                    <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                      {formatCurrency(item.line_total_minor, item.currency)}
+                    </span>
                   </div>
 
-                  {/* Quantity Control */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div className="qty-control">
-                      <button
-                        type="button"
-                        className="qty-btn"
-                        onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                        disabled={isCartLoading}
-                        aria-label="Decrease quantity"
-                      >
-                        <Minus size={12} />
-                      </button>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600, minWidth: '18px', textAlign: 'center' }}>
-                        {item.quantity}
-                      </span>
-                      <button
-                        type="button"
-                        className="qty-btn"
-                        onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                        disabled={isCartLoading}
-                        aria-label="Increase quantity"
-                      >
-                        <Plus size={12} />
-                      </button>
-                    </div>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                      {formatCurrency(item.unit_price_minor, item.currency)} each
+                    </span>
 
-                    <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-main)' }}>
-                      {formatCurrency(item.line_total_minor, item.currency || cart?.currency)}
+                    {/* Quantity Controls */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          border: '1px solid var(--color-border)',
+                          borderRadius: '6px',
+                          backgroundColor: 'var(--color-neutral)',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                          disabled={isCartLoading || item.quantity <= 1}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            padding: '4px 6px',
+                            cursor: 'pointer',
+                            color: 'var(--color-text-secondary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <Minus size={12} />
+                        </button>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 700, padding: '0 6px', color: 'var(--color-text-primary)' }}>
+                          {item.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                          disabled={isCartLoading}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            padding: '4px 6px',
+                            cursor: 'pointer',
+                            color: 'var(--color-text-secondary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <Plus size={12} />
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeFromCart(item.id)}
+                        disabled={isCartLoading}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--color-error)',
+                          cursor: 'pointer',
+                          padding: '2px',
+                        }}
+                        title="Remove item"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeFromCart(item.id)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-subtle)',
-                    cursor: 'pointer',
-                    padding: '6px',
-                  }}
-                  title="Remove item"
-                  disabled={isCartLoading}
-                >
-                  <Trash2 size={16} />
-                </button>
               </div>
             ))
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer Summary & Checkout Action */}
         {items.length > 0 && (
-          <div className="drawer-footer">
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Authoritative Subtotal:</span>
-              <span style={{ fontWeight: 800, fontSize: '1.25rem', color: 'var(--text-main)' }}>
-                {subtotalFormatted}
-              </span>
+          <div className="cart-summary-footer">
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+              <span>Subtotal</span>
+              <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{subtotalFormatted}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+              <span>Estimated Tax</span>
+              <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>$0.00</span>
             </div>
             <div
               style={{
-                fontSize: '0.75rem',
-                color: 'var(--text-subtle)',
-                marginBottom: '16px',
                 display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
+                justifyContent: 'space-between',
+                paddingTop: '8px',
+                borderTop: '1px solid var(--color-border)',
+                fontSize: '1.15rem',
+                fontWeight: 800,
+                color: 'var(--color-text-primary)',
               }}
             >
-              <ShieldCheck size={13} color="var(--accent-emerald)" />
-              <span>Calculated exclusively on server &bull; Zero client-side math</span>
+              <span>Total</span>
+              <span>{subtotalFormatted}</span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+              <ShieldCheck size={12} color="var(--color-secondary)" />
+              <span>Real-time price &amp; stock validation &bull; 15-minute hold upon order confirmation</span>
             </div>
 
             <button
+              id="proceed-checkout-btn"
               type="button"
               className="btn btn-primary"
-              style={{ width: '100%', justifyContent: 'center', padding: '12px' }}
               onClick={handleProceedToPreview}
-              disabled={isCartLoading}
+              style={{ width: '100%', padding: '12px', fontSize: '0.92rem', marginTop: '4px' }}
             >
-              <span>Review Checkout Preview</span>
+              <span>Review Order</span>
               <ArrowRight size={16} />
             </button>
           </div>

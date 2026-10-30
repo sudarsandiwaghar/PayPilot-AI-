@@ -12,7 +12,7 @@ services:
       PAYPILOT_DB_PASSWORD: ${PAYPILOT_DB_PASSWORD:-paypilot_staging_pass}
     volumes:
       - pgdata_staging:/var/lib/postgresql/data
-      - ./scripts/init-staging-db.sh:/docker-entrypoint-initdb.d/init-staging-db.sh:ro
+      - ./backend/scripts/init-staging-db.sh:/docker-entrypoint-initdb.d/init-staging-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ADMIN_USER:-postgres} -d paypilot_staging"]
       interval: 5s

@@ -89,8 +89,8 @@ class Settings(BaseSettings):
 
     # ── LLM / AI Shopping Agent ───────────────────────────────────
     llm_provider: str = Field(
-        default="",
-        description="LLM provider name: 'gemini', 'mock'. If empty/unconfigured, returns error.",
+        default="mock",
+        description="LLM provider name: 'gemini', 'mock'. Defaults to 'mock' for safe no-cost offline operation.",
     )
     llm_api_key: str = Field(
         default="",
@@ -132,8 +132,14 @@ class Settings(BaseSettings):
             url = url.replace("sslmode=prefer", "ssl=prefer")
         return url
 
-    # ── CORS ─────────────────────────────────────────────────────
-    cors_origins: list[str] = Field(default=["http://localhost:3000", "http://localhost:5173"])
+    cors_origins: list[str] = Field(
+        default=[
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+        ]
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod
