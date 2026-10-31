@@ -130,6 +130,19 @@ class Settings(BaseSettings):
             url = url.replace("sslmode=verify-full", "ssl=verify-full")
             url = url.replace("sslmode=verify-ca", "ssl=verify-ca")
             url = url.replace("sslmode=prefer", "ssl=prefer")
+
+        # Strip channel_binding (Neon psql default; unsupported by asyncpg)
+        if "channel_binding=" in url:
+            url = url.replace("&channel_binding=require", "").replace("channel_binding=require&", "")
+            url = url.replace("&channel_binding=prefer", "").replace("channel_binding=prefer&", "")
+            url = url.replace("&channel_binding=disable", "").replace("channel_binding=disable&", "")
+            url = url.replace("?channel_binding=require", "?").replace("?channel_binding=prefer", "?")
+            if url.endswith("?"):
+                url = url[:-1]
+
+        # Strip Neon pooler suffix for direct Alembic migrations & prepared statements
+        if "-pooler." in url:
+            url = url.replace("-pooler.", ".")
         return url
 
     cors_origins: list[str] = Field(

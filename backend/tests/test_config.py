@@ -37,6 +37,11 @@ def test_database_url_normalization_synthetic_urls():
     s3 = Settings(database_url=raw3, _env_file=None)
     assert s3.database_url == raw3
 
+    # Raw Neon copy snippet with -pooler and channel_binding
+    raw4 = "postgresql://user:pass@ep-fake-1234-pooler.us-east-2.neon.tech/neondb?sslmode=require&channel_binding=require"
+    s4 = Settings(database_url=raw4, _env_file=None)
+    assert s4.database_url == "postgresql+asyncpg://user:pass@ep-fake-1234.us-east-2.neon.tech/neondb?ssl=require"
+
 
 def test_cors_origins_parsing():
     """Verify CORS origins parse from various input formats."""
