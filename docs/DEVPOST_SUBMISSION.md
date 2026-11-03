@@ -8,7 +8,7 @@
 * **Tagline:** Budget-aware AI shopping with transparent, safer checkout.
 * **Primary Category:** E-Commerce / Artificial Intelligence / FinTech
 * **Repository:** [https://github.com/sudarsandiwaghar/PayPilot-AI-](https://github.com/sudarsandiwaghar/PayPilot-AI-)
-* **Current Code Baseline:** Commit [`aa99e58a24c8da985f7d4a5f2352d6f544de3edd`](https://github.com/sudarsandiwaghar/PayPilot-AI-/commit/aa99e58a24c8da985f7d4a5f2352d6f544de3edd)
+* **Current Code Baseline:** Commit [`10f3274e3dfda6967442f48d1ab9d829f6a90a58`](https://github.com/sudarsandiwaghar/PayPilot-AI-/commit/10f3274e3dfda6967442f48d1ab9d829f6a90a58)
 
 ### Elevator Pitch
 PayPilot AI is a budget-aware AI shopping assistant that couples conversational natural-language product discovery with deterministic backend safeguards. Shoppers enter plain-English requests, receive recommendations grounded strictly in the catalog, compare items side-by-side, and proceed through a two-stage checkout protected by HMAC-SHA256 signed preview tokens and temporary inventory holds. By enforcing hard budget constraints, read-only AI tools, and simulated payment lifecycles, PayPilot AI demonstrates how conversational commerce can eliminate price hallucinations, accidental purchases, and inventory overselling.

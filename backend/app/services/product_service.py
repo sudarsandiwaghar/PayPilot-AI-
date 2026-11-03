@@ -18,7 +18,6 @@ from app.models.product import Product
 from app.schemas.product import ProductFilterParams
 from app.utils.exceptions import ProductNotFound
 
-
 # Category and concept synonyms mapping common shopper terms to catalog categories
 CATEGORY_SYNONYMS: dict[str, list[str]] = {
     "electronic": ["Audio", "Wearables", "Computing", "Photography", "Gaming"],
