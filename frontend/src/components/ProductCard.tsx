@@ -183,7 +183,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, badgeType }) 
           style={{ flex: 1, padding: '8px 14px', fontSize: '0.84rem', borderRadius: '8px' }}
         >
           {isAddedRecently ? <Check size={14} /> : <ShoppingCart size={14} />}
-          <span>{isAddedRecently ? 'Added' : 'Add to Cart'}</span>
+          <span>{isAddedRecently ? 'Added +1' : 'Add to Cart'}</span>
         </button>
       </div>
 

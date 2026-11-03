@@ -11,6 +11,7 @@ import { CheckoutModal } from './components/CheckoutModal'
 import { PaymentModal } from './components/PaymentModal'
 import { OrderDetailsModal } from './components/OrderDetailsModal'
 import { ComparisonModal } from './components/ComparisonModal'
+import { StickyCartBar } from './components/StickyCartBar'
 import { useSession } from './context/useSession'
 import { AlertCircle, X, Shield, Lock, Server } from 'lucide-react'
 
@@ -19,7 +20,7 @@ export function App() {
   const [aiSearchQuery, setAiSearchQuery] = useState('')
   const [catalogQuery, setCatalogQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
-  const { error, clearError, session } = useSession()
+  const { error, clearError, session, cart } = useSession()
 
   // Hash-based routing synchronization to support refresh & direct navigation
   useEffect(() => {
@@ -127,7 +128,12 @@ export function App() {
         )}
 
         {/* Main Content Container - Seven Page Unified Flow */}
-        <main className="content-container">
+        <main
+          className="content-container"
+          style={{
+            paddingBottom: (cart?.item_count ?? 0) > 0 ? '76px' : undefined,
+          }}
+        >
           {currentView === 'dashboard' ? (
             <DashboardView
               onSearchWithAI={handleSearchWithAI}
@@ -152,6 +158,9 @@ export function App() {
             <OrdersHistoryView onNavigateToCatalog={() => handleSelectView('catalog')} />
           )}
         </main>
+
+        {/* Compact Responsive Sticky Bottom Cart Bar */}
+        <StickyCartBar />
 
         {/* Global Modals & Drawers */}
         <CartDrawer />

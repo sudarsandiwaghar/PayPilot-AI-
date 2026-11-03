@@ -1,15 +1,14 @@
-import React, { useEffect, useState } from 'react'
-import { Search, PackageSearch, RefreshCw, X, ChevronDown } from 'lucide-react'
+import React, { useEffect, useState, useRef } from 'react'
+import { Search, PackageSearch, RefreshCw, X, ChevronDown, Loader2, Scale } from 'lucide-react'
 import type { ProductFilterParams, ProductItem } from '../api/types'
 import { api } from '../api/client'
 import { ProductCard } from './ProductCard'
+import { useSession } from '../context/useSession'
+import { formatCurrency } from '../utils/currency'
+import { getProductImageUrl } from '../utils/productImages'
 
 const CATEGORIES = ['All', 'Audio', 'Laptops', 'Keyboards', 'Monitors', 'Accessories']
 const POPULAR_BRANDS = ['Sony', 'Bose', 'Sennheiser', 'Apple']
-
-import { useSession } from '../context/useSession'
-import { Scale } from 'lucide-react'
-import { formatCurrency } from '../utils/currency'
 
 interface CatalogViewProps {
   initialQuery?: string
@@ -28,8 +27,9 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Filters State
+  // Filters & Search State
   const [searchQuery, setSearchQuery] = useState(initialQuery || '')
+  const [debouncedQuery, setDebouncedQuery] = useState(initialQuery || '')
   const [selectedCategory, setSelectedCategory] = useState(initialCategory || 'All')
   const [selectedBrands, setSelectedBrands] = useState<string[]>([])
   const [minPrice, setMinPrice] = useState<string>('')
@@ -39,6 +39,14 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   const [sortBy, setSortBy] = useState<'rating' | 'price_asc' | 'price_desc' | 'name'>('rating')
   const [page, setPage] = useState(1)
 
+  // Fast typeahead suggestions state
+  const [suggestions, setSuggestions] = useState<ProductItem[]>([])
+  const [isTypeaheadLoading, setIsTypeaheadLoading] = useState(false)
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
+  const searchContainerRef = useRef<HTMLDivElement>(null)
+  const isTypingRef = useRef(false)
+
   // Applied trigger to fetch on button click or query change
   const [appliedFiltersTrigger, setAppliedFiltersTrigger] = useState(0)
 
@@ -47,6 +55,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   if (initialQuery !== prevInitialQuery) {
     setPrevInitialQuery(initialQuery)
     setSearchQuery(initialQuery || '')
+    setDebouncedQuery(initialQuery || '')
   }
 
   const [prevInitialCategory, setPrevInitialCategory] = useState(initialCategory)
@@ -55,6 +64,96 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
     setSelectedCategory(initialCategory || 'All')
   }
 
+  // Debounce live search typing (~300ms) to update grid without hammering the backend
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedQuery(searchQuery)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(handler)
+  }, [searchQuery])
+
+  // Click-outside listener to dismiss the typeahead dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setIsDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Fast catalog-grounded typeahead query as shopper types
+  useEffect(() => {
+    let ignore = false
+    const runTypeahead = async () => {
+      await Promise.resolve()
+      if (ignore) return
+
+      const trimmed = searchQuery.trim()
+      if (!trimmed) {
+        setSuggestions([])
+        setIsTypeaheadLoading(false)
+        setIsDropdownOpen(false)
+        return
+      }
+
+      setIsTypeaheadLoading(true)
+      try {
+        const brandParam = selectedBrands.length === 1 ? selectedBrands[0] : undefined
+        const minPriceMinor = minPrice ? Math.round(parseFloat(minPrice) * 100) : undefined
+        const maxPriceMinor = maxPrice ? Math.round(parseFloat(maxPrice) * 100) : undefined
+
+        const res = await api.listProducts({
+          q: trimmed,
+          category: selectedCategory === 'All' ? undefined : selectedCategory,
+          brand: brandParam,
+          min_price_minor: minPriceMinor,
+          max_price_minor: maxPriceMinor,
+          min_rating: minRating || undefined,
+          in_stock_only: inStockOnly ? true : undefined,
+          page: 1,
+          page_size: 5,
+        })
+        if (!ignore) {
+          let items = res.items
+          if (selectedBrands.length > 0) {
+            items = items.filter(
+              (p) => !p.brand || selectedBrands.some((b) => b.toLowerCase() === p.brand?.toLowerCase())
+            )
+          }
+          if (minRating) {
+            items = items.filter((p) => (p.rating || 0) >= minRating)
+          }
+          setSuggestions(items)
+          if (isTypingRef.current) {
+            setIsDropdownOpen(true)
+          }
+          setActiveSuggestionIndex(-1)
+        }
+      } catch {
+        if (!ignore) {
+          setSuggestions([])
+        }
+      } finally {
+        if (!ignore) {
+          setIsTypeaheadLoading(false)
+        }
+      }
+    }
+
+    const timer = setTimeout(() => {
+      runTypeahead()
+    }, 280)
+
+    return () => {
+      ignore = true
+      clearTimeout(timer)
+    }
+  }, [searchQuery, selectedCategory, selectedBrands, minPrice, maxPrice, minRating, inStockOnly])
+
+  // Catalog products grid query: reacts immediately to debouncedQuery and filters
   useEffect(() => {
     let ignore = false
     const load = async () => {
@@ -68,7 +167,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
         const maxPriceMinor = maxPrice ? Math.round(parseFloat(maxPrice) * 100) : undefined
 
         const params: ProductFilterParams = {
-          q: searchQuery.trim() || undefined,
+          q: debouncedQuery.trim() || undefined,
           category: selectedCategory === 'All' ? undefined : selectedCategory,
           brand: brandParam,
           min_price_minor: minPriceMinor,
@@ -81,7 +180,6 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
         }
         const res = await api.listProducts(params)
         if (!ignore) {
-          // If multiple brands are selected locally, apply client-side filtering if backend only supports single brand
           let items = res.items
           if (selectedBrands.length > 0) {
             items = items.filter(
@@ -109,7 +207,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
       ignore = true
     }
   }, [
-    searchQuery,
+    debouncedQuery,
     selectedCategory,
     sortBy,
     inStockOnly,
@@ -124,6 +222,62 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   const handleApplyFilters = () => {
     setPage(1)
     setAppliedFiltersTrigger((prev) => prev + 1)
+  }
+
+  const handleClearSearch = () => {
+    isTypingRef.current = false
+    setSearchQuery('')
+    setDebouncedQuery('')
+    setSuggestions([])
+    setIsDropdownOpen(false)
+    setActiveSuggestionIndex(-1)
+    setPage(1)
+  }
+
+  const handleSelectSuggestion = (prod: ProductItem) => {
+    isTypingRef.current = false
+    setSearchQuery(prod.name)
+    setDebouncedQuery(prod.name)
+    setIsDropdownOpen(false)
+    setActiveSuggestionIndex(-1)
+    setPage(1)
+
+    // Smoothly scroll and highlight the selected product in the grid
+    setTimeout(() => {
+      const cardEl = document.getElementById(`product-card-${prod.id}`)
+      if (cardEl) {
+        cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        cardEl.classList.add('product-card-highlight')
+        setTimeout(() => {
+          cardEl.classList.remove('product-card-highlight')
+        }, 2200)
+      }
+    }, 150)
+  }
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (!isDropdownOpen && suggestions.length > 0) {
+        setIsDropdownOpen(true)
+        return
+      }
+      setActiveSuggestionIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : 0))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActiveSuggestionIndex((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1))
+    } else if (e.key === 'Escape') {
+      setIsDropdownOpen(false)
+      setActiveSuggestionIndex(-1)
+    } else if (e.key === 'Enter') {
+      if (isDropdownOpen && activeSuggestionIndex >= 0 && suggestions[activeSuggestionIndex]) {
+        e.preventDefault()
+        handleSelectSuggestion(suggestions[activeSuggestionIndex])
+      } else {
+        setIsDropdownOpen(false)
+        handleApplyFilters()
+      }
+    }
   }
 
   const toggleBrand = (brand: string) => {
@@ -211,23 +365,115 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
           ))}
         </div>
 
-        <div style={{ flex: 1, minWidth: '220px', maxWidth: '360px', position: 'relative' }}>
+        <div ref={searchContainerRef} className="typeahead-container">
           <Search
             size={15}
             color="var(--text-muted)"
-            style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }}
+            style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
           />
           <input
             type="text"
             className="input-text"
-            placeholder="Refine search query..."
+            placeholder="Search products, categories, specs..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleApplyFilters()
+            onChange={(e) => {
+              isTypingRef.current = true
+              setSearchQuery(e.target.value)
             }}
-            style={{ paddingLeft: '32px', fontSize: '0.85rem' }}
+            onFocus={() => {
+              if (isTypingRef.current && suggestions.length > 0) setIsDropdownOpen(true)
+            }}
+            onKeyDown={handleSearchKeyDown}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={isDropdownOpen}
+            aria-controls="typeahead-suggestions-list"
+            style={{ paddingLeft: '32px', paddingRight: '32px', fontSize: '0.85rem', width: '100%' }}
           />
+          {isTypeaheadLoading ? (
+            <Loader2
+              size={14}
+              className="spin-animation"
+              style={{
+                position: 'absolute',
+                right: '10px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--color-secondary)',
+                pointerEvents: 'none',
+              }}
+            />
+          ) : searchQuery ? (
+            <button
+              type="button"
+              className="typeahead-clear-btn"
+              onClick={handleClearSearch}
+              aria-label="Clear search input"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+
+          {/* Typeahead Suggestions Dropdown */}
+          {isDropdownOpen && searchQuery.trim().length > 0 && (
+            <div className="typeahead-dropdown" id="typeahead-suggestions-list" role="listbox">
+              <div className="typeahead-header">
+                <span>Matching Products ({suggestions.length})</span>
+                {isTypeaheadLoading && (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.68rem', textTransform: 'none' }}>
+                    <Loader2 size={11} className="spin-animation" />
+                    Searching...
+                  </span>
+                )}
+              </div>
+
+              {suggestions.length > 0 ? (
+                <ul className="typeahead-list">
+                  {suggestions.map((prod, idx) => (
+                    <li
+                      key={prod.id}
+                      role="option"
+                      aria-selected={activeSuggestionIndex === idx}
+                      className={`typeahead-item ${activeSuggestionIndex === idx ? 'active' : ''}`}
+                      onMouseEnter={() => setActiveSuggestionIndex(idx)}
+                      onClick={() => handleSelectSuggestion(prod)}
+                    >
+                      <img
+                        src={getProductImageUrl(prod.image_url, prod.name)}
+                        alt={prod.name}
+                        className="typeahead-item-img"
+                      />
+                      <div className="typeahead-item-info">
+                        <div className="typeahead-item-name">{prod.name}</div>
+                        <div className="typeahead-item-meta">
+                          <span className="badge badge-purple" style={{ fontSize: '0.66rem', padding: '1px 6px' }}>
+                            {prod.category}
+                          </span>
+                          {prod.brand && <span>&bull; {prod.brand}</span>}
+                          <span>&bull;</span>
+                          <span style={{ color: prod.stock_qty > 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
+                            {prod.stock_qty > 0 ? 'In Stock' : 'Out of Stock'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="typeahead-item-price">
+                        {formatCurrency(prod.price_minor, prod.currency)}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : !isTypeaheadLoading ? (
+                <div className="typeahead-empty">
+                  <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    No products match &ldquo;{searchQuery}&rdquo;
+                  </p>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.74rem' }}>
+                    Try searching for &ldquo;electronic&rdquo;, &ldquo;headphones&rdquo;, or &ldquo;laptop&rdquo;
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       </div>
 

@@ -132,3 +132,75 @@ async def test_get_product_detail_not_found(client: AsyncClient) -> None:
     assert payload["data"] is None
     assert len(payload["errors"]) == 1
     assert payload["errors"][0]["code"] == "PRODUCT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_search_electronic_finds_relevant_catalog_products(client: AsyncClient) -> None:
+    """Regression test: typing 'electronic' finds relevant real products even though 'Electronics' is not an exact category."""
+    response = await client.get("/api/v1/products?q=electronic")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] > 0
+    # Should find real tech products (headphones, laptops, smartwatches, consoles)
+    skus = [item["sku"] for item in data["items"]]
+    assert any("XM5" in sku or "MBP" in sku or "GW6" in sku or "SD" in sku for sku in skus)
+    # Herman Miller office chair should NOT be in the results for "electronic"
+    assert "HO-HM-AERON" not in skus
+
+
+@pytest.mark.asyncio
+async def test_search_variant_normalization(client: AsyncClient) -> None:
+    """Plural and singular forms match identically (e.g. headphone vs headphones)."""
+    resp_singular = await client.get("/api/v1/products?q=headphone")
+    resp_plural = await client.get("/api/v1/products?q=headphones")
+    assert resp_singular.status_code == 200
+    assert resp_plural.status_code == 200
+    assert resp_singular.json()["data"]["total"] > 0
+    assert resp_plural.json()["data"]["total"] > 0
+    # Both should find Sony XM5 and Bose QC45
+    names_singular = [p["name"] for p in resp_singular.json()["data"]["items"]]
+    names_plural = [p["name"] for p in resp_plural.json()["data"]["items"]]
+    assert any("Sony" in n for n in names_singular)
+    assert any("Bose" in n for n in names_plural)
+
+
+@pytest.mark.asyncio
+async def test_search_multi_token_conjunction(client: AsyncClient) -> None:
+    """Multi-word query matches all tokens conjunctively."""
+    response = await client.get("/api/v1/products?q=sony+headphones")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] >= 1
+    assert all("Sony" in p["brand"] or "Sony" in p["name"] for p in data["items"])
+
+
+@pytest.mark.asyncio
+async def test_search_metadata_specifications(client: AsyncClient) -> None:
+    """Matches specifications stored in metadata_json (e.g. OLED, Titanium)."""
+    resp_oled = await client.get("/api/v1/products?q=oled")
+    assert resp_oled.status_code == 200
+    data_oled = resp_oled.json()["data"]
+    assert data_oled["total"] >= 1
+    assert any("Steam Deck" in p["name"] or "Epix" in p["name"] for p in data_oled["items"])
+
+
+@pytest.mark.asyncio
+async def test_search_combined_with_category_filter(client: AsyncClient) -> None:
+    """Search query works seamlessly together with category filter."""
+    response = await client.get("/api/v1/products?q=electronic&category=Wearables")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] > 0
+    for item in data["items"]:
+        assert item["category"] == "Wearables"
+
+
+@pytest.mark.asyncio
+async def test_search_no_matches_returns_empty_cleanly(client: AsyncClient) -> None:
+    """Non-existent query terms return 0 results cleanly without errors."""
+    response = await client.get("/api/v1/products?q=xyznonexistentterm123")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] == 0
+    assert len(data["items"]) == 0
+

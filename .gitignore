@@ -66,3 +66,4 @@ docker-compose.override.yml
 # Temporary & Scratch
 scratch/
 .qodo/
+.neon

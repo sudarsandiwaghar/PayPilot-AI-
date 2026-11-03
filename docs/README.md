@@ -275,25 +275,28 @@ This screen-by-screen presentation script covers the complete end-to-end shoppin
 
 ---
 
-### Minute 1: Seeded Catalog, Attribute Comparison & Grounded Assistant (0:00 – 1:00)
+### Minute 1: Seeded Catalog, Live Typeahead & Grounded Assistant (0:00 – 1:00)
 
-* **Screen:** Product Catalog (`http://localhost:5173`)
+* **Screen:** Product Catalog (`http://localhost:5173/#/catalog`)
 * **Actions:**
-  1. Point out the category filters, stock level tags, and the active session indicator in the navigation bar (`Session ...`).
-  2. Click the compare button (`+`) on two items (e.g. *MacBook Pro 14"* and *Garmin Epix Pro*).
-  3. Click **Compare (2)** in the navigation bar to open the **Side-by-Side Product Comparison** modal, review stored attributes, and close the modal.
+  1. Point out the category tabs, brand filters, and the active session indicator in the navigation bar (`Session ...`).
+  2. In the catalog search field, type `"electronic"` slowly. Show that matching product suggestions immediately appear in an accessible dropdown below the input and the product grid updates in real time without pressing Enter.
+  3. Cycle suggestions using arrow keys, select one to show automatic smooth scroll and card highlight, and click **Add to Cart** (pointing out the instant `"Added +1"` button feedback and the sticky bottom cart bar indicator).
+  4. Click the compare button on two items (e.g. *MacBook Pro 14"* and *Garmin Epix Pro*) to review specifications side-by-side.
+
 * **Talking Points:**
   > *"Welcome to PayPilot AI. We pair conversational shopping guidance with deterministic backend transaction safeguards.*
-  > *Shoppers can easily compare stored product attributes, specifications, and pricing side-by-side directly from the seeded demo catalog."*
+  > *Shoppers get fast, catalog-grounded typeahead search across product names, categories, brands, and specifications with variant normalization, along with an authoritative sticky cart bar tracking exact item units."*
 
-* **Screen:** AI Shopping Assistant Tab
+* **Screen:** AI Shopping Assistant Tab (`http://localhost:5173/#/agent`)
 * **Actions:**
-  1. Click the **AI Assistant** tab in the navigation bar.
-  2. Click the quick prompt: *"Noise-canceling headphones for air travel under $400"*.
-  3. Show the ranked recommendation card (*Sony WH-1000XM5* at $399.99) and click **Add to Cart**.
+  1. Switch to the **AI Search Results** tab (or search from Dashboard).
+  2. Type any arbitrary natural-language shopper request into the search input: e.g. *"Noise-canceling headphones for air travel under $400"*.
+  3. Submit the query to show the ranked recommendation card (*Sony WH-1000XM5* at $399.99) with grounded catalog evidence and match score.
+
 * **Talking Points:**
-  > *"Recommendations are grounded in the seeded demo catalog and its stored product attributes.*
-  > *Backend rules enforce budget, stock, and other hard constraints before suggestions are presented to the shopper. We can add the recommended headphones straight to our cart."*
+  > *"Recommendations are grounded strictly in the seeded demo catalog and its verified product attributes.*
+  > *Backend rules enforce budget ceilings, stock availability, and other hard constraints before suggestions are presented to the shopper."*
 
 ---
 
@@ -349,14 +352,14 @@ All secret credentials, environment configurations, virtual environments, build 
 
 ## Verifying the Test & Quality Suite
 
-Run these automated checks locally on Windows to verify backend tests, linting, frontend linting, and production compilation:
+Run these automated checks locally on Windows to verify backend tests, linting, frontend linting, frontend unit tests, and production compilation:
 
 ```cmd
-:: 1. Run all backend tests (86 tests)
-.venv\Scripts\pytest -v
+:: 1. Run all backend tests (111 tests in backend/tests)
+.\.venv\Scripts\python.exe -m pytest backend/tests
 
-:: 2. Run Python linting and code style checks
-.venv\Scripts\ruff check app tests
+:: 2. Run frontend logic and arithmetic tests (20 tests)
+node --test frontend/test/*.test.mjs
 
 :: 3. Run frontend linter (oxlint)
 cd frontend
@@ -364,13 +367,17 @@ npm run lint
 
 :: 4. Run frontend TypeScript check & production build
 npm run build
+
+:: 5. Run live browser CDP smoke test (requires backend on :8000 and frontend on :5173)
+powershell -ExecutionPolicy Bypass -File test/run_browser_smoke_catalog_cart.ps1
 ```
 
 ### Current Verification Results:
-- **Pytest:** 86/86 tests passed (100% pass rate).
-- **Ruff:** 0 errors across all application and test modules.
-- **Frontend Oxlint:** 0 warnings, 0 errors across 18 files.
-- **Frontend Build:** Completed successfully (`tsc -b && vite build`) with 0 errors.
+- **Pytest:** 111/111 tests passed in `backend/tests/` (100% pass rate).
+- **Frontend Node Tests:** 20/20 tests passed across 6 test suites (`live_search_and_cart.test.mjs` and `search_flow.test.mjs`).
+- **Frontend Oxlint:** 0 warnings, 0 errors across 26 files with 116 rules.
+- **Frontend Production Build:** Completed successfully (`tsc -b && vite build` in ~740ms) with 0 errors.
+- **Live Browser CDP Smoke Test:** All catalog search, typeahead dropdown, "Search with AI", and sticky cart bar scenarios passed 100%.
 
 ---
 

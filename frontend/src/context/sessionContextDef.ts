@@ -23,9 +23,11 @@ export interface SessionContextType {
 
   // Cart Actions (Server Authoritative)
   refreshCart: () => Promise<void>
-  addToCart: (productId: string, quantity?: number) => Promise<boolean>
+  addToCart: (productId: string, quantity?: number, openDrawer?: boolean) => Promise<boolean>
   updateQuantity: (itemId: string, quantity: number) => Promise<boolean>
   removeFromCart: (itemId: string) => Promise<boolean>
+  cartFeedback: string | null
+  clearCartFeedback: () => void
 
   // Flow State & Modals
   isCartOpen: boolean

@@ -29,6 +29,16 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(true)
   const [isCartLoading, setIsCartLoading] = useState<boolean>(false)
   const [error, setErrorState] = useState<string | null>(null)
+  const [cartFeedback, setCartFeedback] = useState<string | null>(null)
+  const feedbackTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearCartFeedback = useCallback(() => {
+    if (feedbackTimerRef.current) {
+      clearTimeout(feedbackTimerRef.current)
+      feedbackTimerRef.current = null
+    }
+    setCartFeedback(null)
+  }, [])
 
   // Modals & Navigation
   const [isCartOpen, setIsCartOpen] = useState(false)
@@ -107,11 +117,12 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setSession(null)
     setToken(null)
     setCart(null)
+    clearCartFeedback()
     setCheckoutPreview(null)
     setActiveOrder(null)
     setPaymentAttempt(null)
     await initSession()
-  }, [initSession])
+  }, [initSession, clearCartFeedback])
 
   // ── Cart Refresh ───────────────────────────────────────────────
   const refreshCart = useCallback(async () => {
@@ -147,7 +158,7 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [initSession])
 
   // ── Cart Operations ────────────────────────────────────────────
-  const addToCart = async (productId: string, quantity = 1): Promise<boolean> => {
+  const addToCart = async (productId: string, quantity = 1, openDrawer = false): Promise<boolean> => {
     if (!session?.session_id || !token) {
       setErrorState('No active shopping session.')
       return false
@@ -156,7 +167,17 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setIsCartLoading(true)
       const updatedCart = await api.addItemToCart(session.session_id, token, productId, quantity)
       setCart(updatedCart)
-      setIsCartOpen(true)
+      if (feedbackTimerRef.current) {
+        clearTimeout(feedbackTimerRef.current)
+      }
+      setCartFeedback(`Added to cart +${quantity}`)
+      feedbackTimerRef.current = setTimeout(() => {
+        setCartFeedback(null)
+      }, 2800)
+
+      if (openDrawer) {
+        setIsCartOpen(true)
+      }
       return true
     } catch (err) {
       setErrorState(err instanceof Error ? err.message : 'Failed to add item to cart')
@@ -235,6 +256,8 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addToCart,
         updateQuantity,
         removeFromCart,
+        cartFeedback,
+        clearCartFeedback,
         isCartOpen,
         setIsCartOpen,
         comparisonIds,

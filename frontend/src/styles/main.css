@@ -1034,3 +1034,317 @@ h1, h2, h3, h4, h5, h6 {
     transform: rotate(360deg);
   }
 }
+
+/* ==========================================================================
+   Typeahead Suggestion Dropdown & Live Search
+   ========================================================================== */
+
+.typeahead-container {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+  max-width: 380px;
+}
+
+.typeahead-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background-color: var(--color-neutral);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 30px rgba(50, 16, 100, 0.16), 0 4px 8px rgba(50, 16, 100, 0.08);
+  z-index: 50;
+  overflow: hidden;
+  animation: fadeInDown 180ms ease-out;
+}
+
+.typeahead-header {
+  padding: 8px 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background-color: var(--color-tertiary);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.typeahead-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.typeahead-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  border-left: 3px solid transparent;
+}
+
+.typeahead-item:hover,
+.typeahead-item.active {
+  background-color: var(--color-tertiary);
+  border-left-color: var(--color-secondary);
+}
+
+.typeahead-item-img {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  background-color: var(--color-tertiary);
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+}
+
+.typeahead-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.typeahead-item-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.typeahead-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.typeahead-item-price {
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: var(--color-primary);
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.typeahead-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.typeahead-clear-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.typeahead-clear-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--color-tertiary);
+}
+
+.product-card-highlight {
+  animation: pulseHighlight 2s ease-in-out;
+}
+
+@keyframes pulseHighlight {
+  0% {
+    box-shadow: 0 0 0 0 rgba(109, 40, 217, 0.7);
+  }
+  30% {
+    box-shadow: 0 0 0 8px rgba(109, 40, 217, 0.3);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(109, 40, 217, 0);
+  }
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ==========================================================================
+   Compact Responsive Sticky Bottom Cart Bar
+   ========================================================================== */
+
+.sticky-cart-bar {
+  position: fixed;
+  bottom: 16px;
+  right: 24px;
+  left: 24px;
+  max-width: 620px;
+  margin: 0 auto;
+  background-color: var(--color-primary);
+  color: var(--color-white);
+  border: 1px solid rgba(222, 214, 233, 0.25);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 30px rgba(50, 16, 100, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  gap: 12px;
+  z-index: 45;
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  animation: slideUpFade 250ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sticky-cart-bar:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 36px rgba(50, 16, 100, 0.35);
+}
+
+@media (min-width: 901px) {
+  .sticky-cart-bar {
+    left: calc(250px + 24px);
+  }
+}
+
+@media (max-width: 600px) {
+  .sticky-cart-bar {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    padding: 8px 12px;
+  }
+}
+
+.sticky-cart-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sticky-cart-icon-wrapper {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background-color: var(--color-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sticky-cart-unit-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background-color: var(--color-white);
+  color: var(--color-primary);
+  font-size: 0.72rem;
+  font-weight: 800;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 9999px;
+  padding: 0 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.sticky-cart-text-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.sticky-cart-main-text {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-white);
+}
+
+.sticky-cart-subtotal-text {
+  font-size: 0.76rem;
+  color: var(--color-tertiary);
+  opacity: 0.9;
+}
+
+.sticky-cart-feedback-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #10B981;
+  color: #FFFFFF;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+  animation: pulseToast 300ms ease-out;
+}
+
+.sticky-cart-bar-right {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.sticky-cart-view-btn {
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes slideUpFade {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pulseToast {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

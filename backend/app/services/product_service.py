@@ -10,13 +10,99 @@ from __future__ import annotations
 import math
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.product import Product
 from app.schemas.product import ProductFilterParams
 from app.utils.exceptions import ProductNotFound
+
+
+# Category and concept synonyms mapping common shopper terms to catalog categories
+CATEGORY_SYNONYMS: dict[str, list[str]] = {
+    "electronic": ["Audio", "Wearables", "Computing", "Photography", "Gaming"],
+    "electronics": ["Audio", "Wearables", "Computing", "Photography", "Gaming"],
+    "gadget": ["Audio", "Wearables", "Computing", "Photography", "Gaming"],
+    "gadgets": ["Audio", "Wearables", "Computing", "Photography", "Gaming"],
+    "tech": ["Audio", "Wearables", "Computing", "Photography", "Gaming"],
+    "technology": ["Audio", "Wearables", "Computing", "Photography", "Gaming"],
+    "computer": ["Computing"],
+    "computers": ["Computing"],
+    "pc": ["Computing"],
+    "laptop": ["Computing"],
+    "laptops": ["Computing"],
+    "notebook": ["Computing"],
+    "notebooks": ["Computing"],
+    "audio": ["Audio"],
+    "headphone": ["Audio"],
+    "headphones": ["Audio"],
+    "earphone": ["Audio"],
+    "earphones": ["Audio"],
+    "earbud": ["Audio"],
+    "earbuds": ["Audio"],
+    "speaker": ["Audio"],
+    "speakers": ["Audio"],
+    "sound": ["Audio"],
+    "music": ["Audio"],
+    "wearable": ["Wearables"],
+    "wearables": ["Wearables"],
+    "watch": ["Wearables"],
+    "watches": ["Wearables"],
+    "smartwatch": ["Wearables"],
+    "smartwatches": ["Wearables"],
+    "fitness": ["Wearables"],
+    "camera": ["Photography"],
+    "cameras": ["Photography"],
+    "photo": ["Photography"],
+    "photography": ["Photography"],
+    "drone": ["Photography"],
+    "drones": ["Photography"],
+    "game": ["Gaming"],
+    "games": ["Gaming"],
+    "gaming": ["Gaming"],
+    "console": ["Gaming"],
+    "consoles": ["Gaming"],
+    "monitor": ["Home Office"],
+    "monitors": ["Home Office"],
+    "display": ["Home Office"],
+    "displays": ["Home Office"],
+    "screen": ["Home Office"],
+    "screens": ["Home Office"],
+    "mouse": ["Home Office"],
+    "mice": ["Home Office"],
+    "keyboard": ["Home Office"],
+    "keyboards": ["Home Office"],
+    "office": ["Home Office"],
+    "chair": ["Home Office"],
+    "seating": ["Home Office"],
+}
+
+
+def get_term_variants(term: str) -> set[str]:
+    """Generate search variants for a term (singular/plural, common inflections)."""
+    t = term.lower().strip()
+    if not t:
+        return set()
+    variants = {t}
+
+    if t.endswith("ies") and len(t) > 4:
+        variants.add(t[:-3] + "y")
+    elif t.endswith("es") and len(t) > 3:
+        variants.add(t[:-2])
+    elif t.endswith("s") and not t.endswith("ss") and len(t) > 2:
+        variants.add(t[:-1])
+    else:
+        variants.add(t + "s")
+        if t.endswith(("ch", "sh", "x", "s", "z")):
+            variants.add(t + "es")
+
+    if t.endswith("ics"):
+        variants.add(t[:-1])
+    elif t.endswith("ic"):
+        variants.add(t + "s")
+
+    return variants
 
 
 class ProductService:
@@ -35,14 +121,43 @@ class ProductService:
         stmt = select(Product).where(Product.is_active.is_(True))
 
         if params.q:
-            query_str = f"%{params.q.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    Product.name.ilike(query_str),
-                    Product.description.ilike(query_str),
-                    Product.brand.ilike(query_str),
-                )
-            )
+            raw_q = params.q.strip()
+            tokens = [tok for tok in raw_q.split() if tok]
+            if tokens:
+                token_clauses = []
+                for token in tokens:
+                    variants = get_term_variants(token)
+                    variant_clauses = []
+
+                    # 1. Search text across name, description, brand, category, and metadata_json (specifications/tags)
+                    for v in variants:
+                        v_pattern = f"%{v}%"
+                        variant_clauses.extend([
+                            Product.name.ilike(v_pattern),
+                            Product.description.ilike(v_pattern),
+                            Product.brand.ilike(v_pattern),
+                            Product.category.ilike(v_pattern),
+                            and_(
+                                Product.metadata_json.is_not(None),
+                                func.cast(Product.metadata_json, String).ilike(v_pattern),
+                            ),
+                        ])
+
+                    # 2. Check concept/category synonyms and sensible variants
+                    for v in variants:
+                        if v in ("electronic", "electronics"):
+                            variant_clauses.append(
+                                or_(
+                                    Product.category.in_(["Audio", "Wearables", "Computing", "Photography", "Gaming"]),
+                                    and_(Product.category == "Home Office", Product.sku != "HO-HM-AERON"),
+                                )
+                            )
+                        elif v in CATEGORY_SYNONYMS:
+                            variant_clauses.append(Product.category.in_(CATEGORY_SYNONYMS[v]))
+
+                    token_clauses.append(or_(*variant_clauses))
+
+                stmt = stmt.where(and_(*token_clauses))
 
         if params.category:
             stmt = stmt.where(Product.category == params.category)

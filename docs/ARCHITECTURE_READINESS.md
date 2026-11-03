@@ -1,9 +1,9 @@
 # PayPilot AI — Source-Backed Architecture Readiness Audit
 
-**Audit Date:** October 25, 2026  
+**Audit Date:** November 3, 2026  
 **Auditor:** Antigravity AI  
-**Scope:** Full repository source code audit (`frontend/`, `app/`, `alembic/`, `tests/`, deployment blueprints).  
-**Source Baseline:** Git commit [`0104dc74709065cab77c76f8ec2cca380c0d7359`](https://github.com/sudarsandiwaghar/PayPilot-AI-/commit/0104dc74709065cab77c76f8ec2cca380c0d7359) with completed tool registry reconciliation, Orders & Spend history frontend flow, and AI model boundary secret safety.
+**Scope:** Full repository source code audit (`frontend/`, `backend/`, `alembic/`, `backend/tests/`, `frontend/test/`, deployment blueprints).  
+**Source Baseline:** Git HEAD commit [`aa99e58a24c8da985f7d4a5f2352d6f544de3edd`](https://github.com/sudarsandiwaghar/PayPilot-AI-/commit/aa99e58a24c8da985f7d4a5f2352d6f544de3edd) with completed tool registry reconciliation, Orders & Spend history frontend flow, AI model boundary secret safety, fast catalog typeahead search, and authoritative responsive sticky bottom cart bar.
 
 ---
 
@@ -16,12 +16,12 @@ To ensure clear, unambiguous operational planning, **blockers for immediate no-c
 ```
 ┌──────────────────────────────────────────────────────────┐
 │      IMMEDIATE NO-COST MOCK / DEMO STAGING               │
-│  Status: READY (Pending only Render Blueprint Apply)     │
+│  Status: READY (Local Verified · Cloud Staging UNVERIFIED)│
 ├──────────────────────────────────────────────────────────┤
 │ • Defaults: PAYPAL_MODE=mock, LLM_PROVIDER=mock          │
 │ • Zero external paid accounts, credit cards, or keys     │
-│ • Neon Free PostgreSQL connectivity: UNVERIFIED         │
-│   (Becomes VERIFIED upon passing /api/v1/health/ready)   │
+│ • Cloud Staging (Render/Neon): UNVERIFIED                │
+│   (Requires live deploy verification via /health/ready)  │
 └──────────────────────────────────────────────────────────┘
                             │
                             ▼ (Future Phases Only)
@@ -39,12 +39,12 @@ To ensure clear, unambiguous operational planning, **blockers for immediate no-c
 
 | Area | Status | Verified Flow / Implementation Evidence |
 | :--- | :---: | :--- |
-| **1. Frontend UI** | **COMPLETE** | 7-page flow styled with Superdesign Warm Mocha & Ivory (`#59402F` / `#F1EBE5`): Dashboard (`DashboardView.tsx`), AI Shopping Chat (`AgentChatView.tsx`), Search Results (`CatalogView.tsx`), Comparison Matrix (`ProductComparisonView.tsx`), Cart Drawer (`CartDrawer.tsx`), Checkout Review & Confirmation (`CheckoutModal.tsx`, `PaymentModal.tsx`), and Orders & Session Spend History (`OrdersHistoryView.tsx`). Verified via browser smoke flow and build tests. |
-| **2. Backend API** | **COMPLETE** | FastAPI gateway, Pydantic v2 schemas, RFC-compliant error envelope, SHA-256 session token hashing, HMAC-SHA256 checkout tokens, row-level locking (`SELECT FOR UPDATE`), background stock sweeper. Verified via 103 passing pytest tests. |
+| **1. Frontend UI** | **COMPLETE** | 7-page unified flow styled with canonical Deep Purple & White design system (Primary `#321064`, Secondary `#6D28D9`, Soft Surface `#F4F0FA`, White `#FFFFFF`, Text `#21152F` / `#62576F`, Border `#DED6E9`): Dashboard (`DashboardView.tsx`), AI Shopping Chat (`AgentChatView.tsx`), Product Catalog with live debounced typeahead (`CatalogView.tsx`), Comparison Matrix (`ProductComparisonView.tsx`), Cart Drawer (`CartDrawer.tsx`), Checkout Review & Confirmation (`CheckoutModal.tsx`, `PaymentModal.tsx`), Orders & Session Spend History (`OrdersHistoryView.tsx`), and Responsive Sticky Bottom Cart Bar (`StickyCartBar.tsx`). Verified via headless Chrome CDP smoke checks, node test runner (20 tests), and production Vite build. |
+| **2. Backend API** | **COMPLETE** | FastAPI gateway, Pydantic v2 schemas, RFC-compliant error envelope, SHA-256 session token hashing, HMAC-SHA256 checkout tokens, row-level locking (`SELECT FOR UPDATE`), background stock sweeper, catalog search with variant and concept normalization. Verified via 111 passing pytest tests in `backend/tests/`. |
 | **3. AI Agent Layer** | **COMPLETE (Mock) / UNVERIFIED (Live)** | Canonical tool registry (`ALLOWED_TOOLS`), read-only allowlist enforcement, deterministic scoring and knapsack budget allocation, ambiguity detection. `MockLLMProvider` verified offline with zero credentials; `GeminiLLMProvider` verified for header-based auth, fallback, and secret redaction; live Gemini API call remains UNVERIFIED. |
 | **4. Product Intelligence** | **COMPLETE (Seeded) / DEFERRED (Live Adapters)** | Seeded catalog with source evidence models (`ProductSource`), hard SQL constraint filters, deterministic ranking formula, and pure knapsack budget optimization. External web crawling is explicitly omitted for no-cost staging; risks and requirements documented below. |
 | **5. Payment Gateway** | **COMPLETE (Mock) / UNVERIFIED (Live)** | Tamper-proof HMAC preview tokens, stock reservation hold state machine, synthetic buyer approval simulation, and demo payment capture verified via automated tests and live browser execution. PayPal Sandbox/Live code is scaffolded but UNVERIFIED against real PayPal endpoints. |
-| **6. Data & Operations** | **COMPLETE (Local) / UNVERIFIED (Cloud Neon)** | PostgreSQL schema, Alembic migrations, append-only audit ledger, structured JSON logging with secret scrubbing, liveness probe (`/health`), and readiness probe (`/health/ready`). Local PostgreSQL verified; live Neon cloud database connectivity remains UNVERIFIED until deployed. |
+| **6. Data & Operations** | **COMPLETE (Local) / UNVERIFIED (Cloud Neon)** | PostgreSQL schema, Alembic migrations, append-only audit ledger, structured JSON logging with secret scrubbing, liveness probe (`/health`), and readiness probe (`/health/ready`). Local PostgreSQL verified; live Neon cloud database connectivity and Render deployment remain UNVERIFIED. |
 
 ---
 
@@ -96,15 +96,16 @@ Every component is classified as:
 | Component | Status | Key Source Files / Symbols | Verified By | Implementation Reality & Verified Boundary |
 | :--- | :---: | :--- | :--- | :--- |
 | **1.1 Shopping Dashboard** | `COMPLETE` | [`frontend/src/components/DashboardView.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/DashboardView.tsx) | Browser smoke flow, `tsc -b`, `oxlint` | Central dashboard with dynamic natural-language AI search bar ("Search with AI"), empty initial input, category shelves, top catalog recommendations, and active session spend metrics (subtotal, settled spend per session, order count). |
-| **1.2 AI Shopping Search & Assistant** | `COMPLETE` | [`frontend/src/components/AgentChatView.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/AgentChatView.tsx) | Browser smoke flow, `tests/test_agent.py` | Conversational and dynamic AI search results flow: user-entered natural-language request, ambiguity clarification card, grounded recommendations with match scores & catalog source evidence, budget ceiling per query, and direct Add to Cart / Compare actions. |
-| **1.3 Product Catalog Explorer** | `COMPLETE` | [`frontend/src/components/CatalogView.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/CatalogView.tsx) | Browser smoke flow, `tsc -b`, `oxlint` | Category filters, sort by rating/price, in-stock toggle, reactive product cards with catalog sources and specs drawer. Single page rendering. |
-| **1.4 Product Comparison Matrix** | `COMPLETE` | [`ProductComparisonView.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/ProductComparisonView.tsx), [`ComparisonModal.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/ComparisonModal.tsx) | Browser smoke flow, `tests/test_agent.py` | Side-by-side comparison tray comparing technical specifications, ratings, stock counts, and AI match reasons for up to 4 products with direct Add to Cart. |
-| **1.5 Shopping Cart Drawer** | `COMPLETE` | [`frontend/src/components/CartDrawer.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/CartDrawer.tsx) | Browser smoke flow, `tests/test_checkout.py` | Slide-over cart drawer with thumbnail previews, quantity adjustments, line item removal, subtotal, and truthful notice: 15-minute hold upon order confirmation. |
-| **1.6 Checkout Review & Confirmation** | `COMPLETE` | [`CheckoutModal.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/CheckoutModal.tsx), [`PaymentModal.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/PaymentModal.tsx) | Browser smoke flow, `tests/test_checkout.py`, `tests/test_payments.py` | HMAC preview token generation with 10-minute expiry countdown (`expires_at`), price/stock revalidation, explicit shopper confirmation checkbox, and two-step synthetic demo payment flow (`PAYPAL_MODE=mock`). |
-| **1.7 Orders & Session Spend History** | `COMPLETE (Session)` | [`OrdersHistoryView.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/OrdersHistoryView.tsx), [`app/api/v1/orders.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/api/v1/orders.py) | Browser smoke flow, `tests/test_orders.py` | Dedicated view (`#nav-tab-orders`) displaying session settled spend, placed orders count, itemized receipts, supported status badges (`PAID`, `STOCK RESERVED`, `PROCESSING`, `FAILED`, `CANCELLED`), and architecture data boundary notice. |
-| **2.1 API Gateway & Validation** | `COMPLETE` | [`app/main.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/main.py), [`app/schemas/common.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/schemas/common.py) | `tests/test_agent.py::test_request_validation_error_envelope` | Standardized RFC error envelope (`code`, `message`, `field`, `request_id`). Request-ID middleware attaches `X-Request-ID`. |
-| **2.2 Auth & Session Management** | `COMPLETE` | [`app/services/session_service.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/services/session_service.py), [`app/models/session.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/models/session.py) | `tests/test_sessions.py`, `tests/test_security.py` | CSPRNG bearer tokens (`pp_sess_...`); stored strictly as SHA-256 hashes; constant-time comparison via `hmac.compare_digest`. |
-| **2.3 Shopping Agent Orchestrator** | `COMPLETE` | [`app/api/v1/agent.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/api/v1/agent.py), [`DecisionEngine`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/services/agent/decision_engine.py) | `tests/test_agent.py` (11 tests), browser flow | Coordinates LLM boundary, SQL hard filtering, deterministic composite ranking, budget optimization, and audit logging. |
+| **1.2 AI Shopping Search & Assistant** | `COMPLETE` | [`frontend/src/components/AgentChatView.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/AgentChatView.tsx) | Browser smoke flow, `backend/tests/test_agent.py` | Conversational and dynamic AI search results flow: user-entered natural-language request, ambiguity clarification card, grounded recommendations with match scores & catalog source evidence, budget ceiling per query, and direct Add to Cart / Compare actions. |
+| **1.3 Product Catalog Explorer & Typeahead** | `COMPLETE` | [`frontend/src/components/CatalogView.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/CatalogView.tsx), [`backend/app/services/product_service.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/app/services/product_service.py) | Browser CDP smoke check, `live_search_and_cart.test.mjs`, `backend/tests/test_products.py` | Category filters, sort by rating/price, in-stock toggle, reactive product cards with catalog sources and specs drawer. Live fast typeahead search (debounced ~280-300ms) matching name, description, brand, category, metadata specifications, and concept synonyms (e.g. "electronic" -> catalog tech). Keyboard navigation, click-outside dismissal, smooth scroll highlight. |
+| **1.4 Product Comparison Matrix** | `COMPLETE` | [`ProductComparisonView.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/ProductComparisonView.tsx), [`ComparisonModal.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/ComparisonModal.tsx) | Browser smoke flow, `backend/tests/test_agent.py` | Side-by-side comparison tray comparing technical specifications, ratings, stock counts, and AI match reasons for up to 4 products with direct Add to Cart. |
+| **1.5 Shopping Cart Drawer** | `COMPLETE` | [`frontend/src/components/CartDrawer.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/CartDrawer.tsx) | Browser smoke flow, `backend/tests/test_checkout.py` | Slide-over cart drawer with thumbnail previews, quantity adjustments, line item removal, subtotal, and truthful notice: 15-minute hold upon order confirmation. |
+| **1.6 Checkout Review & Confirmation** | `COMPLETE` | [`CheckoutModal.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/CheckoutModal.tsx), [`PaymentModal.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/PaymentModal.tsx) | Browser smoke flow, `backend/tests/test_checkout.py`, `backend/tests/test_payments.py` | HMAC preview token generation with 10-minute expiry countdown (`expires_at`), price/stock revalidation, explicit shopper confirmation checkbox, and two-step synthetic demo payment flow (`PAYPAL_MODE=mock`). |
+| **1.7 Orders & Session Spend History** | `COMPLETE (Session)` | [`OrdersHistoryView.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/OrdersHistoryView.tsx), [`app/api/v1/orders.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/api/v1/orders.py) | Browser smoke flow, `backend/tests/test_orders.py` | Dedicated view (`#nav-tab-orders`) displaying session settled spend, placed orders count, itemized receipts, supported status badges (`PAID`, `STOCK RESERVED`, `PROCESSING`, `FAILED`, `CANCELLED`), and architecture data boundary notice. |
+| **1.8 Responsive Sticky Bottom Cart Bar** | `COMPLETE` | [`frontend/src/components/StickyCartBar.tsx`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/components/StickyCartBar.tsx), [`frontend/src/styles/main.css`](file:///c:/Users/sudar/Documents/Paypilot%20AI/frontend/src/styles/main.css) | Browser CDP smoke check, `live_search_and_cart.test.mjs` | Compact viewport-docked cart indicator displaying authoritative total unit sum ($\sum \text{quantity}$), subtotal, temporary addition feedback (`Added to cart +1`/`+2`), and one-click cart drawer opening. Automatically responsive across mobile and desktop without obstructing controls. |
+| **2.1 API Gateway & Validation** | `COMPLETE` | [`backend/app/main.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/app/main.py), [`backend/app/schemas/common.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/app/schemas/common.py) | `backend/tests/test_agent.py::test_request_validation_error_envelope` | Standardized RFC error envelope (`code`, `message`, `field`, `request_id`). Request-ID middleware attaches `X-Request-ID`. |
+| **2.2 Auth & Session Management** | `COMPLETE` | [`backend/app/services/session_service.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/app/services/session_service.py), [`backend/app/models/session.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/app/models/session.py) | `backend/tests/test_sessions.py`, `backend/tests/test_security.py` | CSPRNG bearer tokens (`pp_sess_...`); stored strictly as SHA-256 hashes; constant-time comparison via `hmac.compare_digest`. |
+| **2.3 Shopping Agent Orchestrator** | `COMPLETE` | [`backend/app/api/v1/agent.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/app/api/v1/agent.py), [`DecisionEngine`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/app/services/agent/decision_engine.py) | `backend/tests/test_agent.py` (13 tests), browser flow | Coordinates LLM boundary, SQL hard filtering, deterministic composite ranking, budget optimization, and audit logging. |
 | **3.1 Intent & Constraint Parsing** | `COMPLETE` | [`MockLLMProvider.parse_intent`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/services/agent/llm_provider.py#L87) | `tests/test_agent.py::test_agent_valid_recommendation_flow` | Extracts category, budget in minor units, required features, and detects query ambiguity without hallucinations. |
 | **3.2 Bounded Planning** | `COMPLETE` | [`app/services/agent/decision_engine.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/services/agent/decision_engine.py) | `tests/test_agent.py` | Fixed, deterministic 6-stage execution pipeline. Does not execute unconstrained autonomous multi-turn loops. |
 | **3.3 Safety & Purchase Policy** | `COMPLETE` | [`ALLOWLISTED_TOOLS`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/services/agent/tools.py#L27), [`Product CheckConstraints`](file:///c:/Users/sudar/Documents/Paypilot%20AI/app/models/product.py#L83) | `tests/test_agent.py::test_tool_allowlisting_strict_enforcement` | AI agent has access only to read-only discovery/budget tools; strictly forbidden from creating orders or triggering payments. |
@@ -197,16 +198,24 @@ The complete end-to-end shopping lifecycle was executed in a live browser on `ht
 ## 6. Exact Verification Commands & Results
 
 ### 1. Backend Automated Regression Suite
-- **Command:** `.venv\Scripts\pytest`
-- **Result:** `103 passed in 37.47s` (including all 11 agent tests, 17 payment tests, 10 stock expiry flow tests, and config tests).
+- **Command:** `.\.venv\Scripts\python.exe -m pytest backend/tests`
+- **Result:** `111 passed in 59.77s` (including all 13 agent tests, 15 product/search tests, 17 payment tests, 10 stock expiry flow tests, and config tests).
 
-### 2. Frontend Linting & Production Build
+### 2. Frontend Node Tests (Logic & Arithmetic)
+- **Command:** `node --test frontend/test/*.test.mjs`
+- **Result:** `20 passed, 0 failed` across 6 test suites (`live_search_and_cart.test.mjs` and `search_flow.test.mjs`).
+
+### 3. Frontend Linting & Production Build
 - **Command:** `cd frontend && npm run lint && npm run build`
 - **Result:** 
-  - `oxlint`: `Found 0 warnings and 0 errors.`
-  - `tsc -b && vite build`: `built in 220ms` with zero TypeScript or bundling errors.
+  - `oxlint`: `Found 0 warnings and 0 errors.` across 26 files with 116 rules.
+  - `tsc -b && vite build`: `built in 740ms` with zero TypeScript or bundling errors.
 
-### 3. Backend Health & Readiness Probes
+### 4. Live Browser CDP Smoke Suite
+- **Command:** `powershell -ExecutionPolicy Bypass -File frontend/test/run_browser_smoke_catalog_cart.ps1`
+- **Result:** `ALL LIVE BROWSER SMOKE CHECKS FOR CATALOG SEARCH & CART PASSED 100%` (tested catalog typing "electronic", dropdown suggestions, results grid update, scroll/highlight on select, "Search with AI" submit flow, sticky cart bar appearance with `+1` feedback, drawer toggle, and responsive desktop/mobile viewports).
+
+### 5. Backend Health & Readiness Probes
 - **Liveness Probe:** `curl http://127.0.0.1:8000/api/v1/health`
   - Response: `{"status":"ok","version":"0.1.0","timestamp":"..."}`
 - **Readiness Probe:** `curl http://127.0.0.1:8000/api/v1/health/ready`
@@ -225,10 +234,11 @@ The complete end-to-end shopping lifecycle was executed in a live browser on `ht
 
 ## 7. Remaining Gaps & Clear Acceptance Criteria
 
-### Remaining Blockers for Real Live Cloud Deployment (No-Cost Staging)
-1. **Apply Render Blueprint to Live Neon Database:**
-   - *Status:* **`UNVERIFIED`**
-   - *Acceptance Criteria:* Apply `render.yaml` in Render Dashboard, input the private Neon Free connection string for `DATABASE_URL`, and verify that `GET https://paypilot-backend.onrender.com/api/v1/health/ready` returns `"status": "ready"` with PostgreSQL check `"status": "ok"`.
+### Real Live Cloud Deployment (No-Cost Staging)
+1. **Render Service + Neon Staging Branch Verification:**
+   - *Status:* **`UNVERIFIED`** (Cloud runtime)
+   - *Reality:* Neon staging branch (`br-hidden-fire-b5ju2jqs`) and Render service (`srv-dbikd08ae00c73buj1p0`) exist and configuration has been transferred, but live cloud runtime startup, migrations, and health probes (`https://paypilot-backend.onrender.com/api/v1/health/ready`) have not yet been directly observed live.
+   - *Policy:* Do not claim cloud staging is live until directly observed.
 
 ### Future Live Provider Integration Requirements (Non-Blockers for Mock Staging)
 1. **PayPal Sandbox / Live Credentials:**
