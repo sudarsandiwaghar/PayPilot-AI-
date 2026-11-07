@@ -16,6 +16,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+import os
+os.environ["PAYPAL_MODE"] = "mock"
+
 from app.config import get_settings
 from app.database import Base, get_db
 from app.main import app

@@ -12,6 +12,7 @@ import {
 import { useSession } from '../context/useSession'
 import { api, ApiErrorResponse } from '../api/client'
 import { formatCurrency } from '../utils/currency'
+import type { PayPalPublicConfig } from '../api/types'
 
 interface PaymentModalProps {
   onNavigateToOrders?: () => void
@@ -32,7 +33,55 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
   const [isLoadingAttempt, setIsLoadingAttempt] = useState(false)
   const [isCapturing, setIsCapturing] = useState(false)
   const [isApproving, setIsApproving] = useState(false)
+  const [hasOpenedPayPalUrl, setHasOpenedPayPalUrl] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [paypalConfig, setPaypalConfig] = useState<PayPalPublicConfig | null>(null)
+  const [sdkReady, setSdkReady] = useState(false)
+
+  // Fetch PayPal public config and load PayPal SDK if in sandbox mode
+  useEffect(() => {
+    let isMounted = true
+    const loadConfigAndSdk = async () => {
+      try {
+        const config = await api.getPayPalConfig()
+        if (!isMounted) return
+        setPaypalConfig(config)
+
+        if (config.client_id && !config.is_demo) {
+          const scriptId = 'paypal-js-sdk-live'
+          let script = document.getElementById(scriptId) as HTMLScriptElement | null
+          if (!script) {
+            script = document.createElement('script')
+            script.id = scriptId
+            script.src = `https://www.paypal.com/sdk/js?client-id=${config.client_id}&currency=${config.currency || 'USD'}&intent=capture`
+            script.async = true
+            script.onload = () => {
+              if (isMounted) setSdkReady(true)
+            }
+            script.onerror = () => {
+              console.warn('PayPal JS SDK failed to load; using fallback checkout flow.')
+            }
+            document.body.appendChild(script)
+          } else {
+            const paypalWin = (window as unknown as { paypal?: any }).paypal
+            if (paypalWin) {
+              setSdkReady(true)
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load PayPal config:', err)
+      }
+    }
+
+    if (isPaymentOpen) {
+      loadConfigAndSdk()
+    }
+
+    return () => {
+      isMounted = false
+    }
+  }, [isPaymentOpen])
 
   // Initialize or fetch payment attempt when modal opens
   useEffect(() => {
@@ -64,6 +113,66 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
       isMounted = false
     }
   }, [isPaymentOpen, activeOrder?.id, token, paymentAttempt, setPaymentAttempt])
+
+  // Render official PayPal Buttons into container when SDK is ready
+  useEffect(() => {
+    if (!sdkReady || !isPaymentOpen || !activeOrder?.id || !token) return
+    const container = document.getElementById('paypal-button-container')
+    if (!container) return
+    container.innerHTML = ''
+
+    const paypalWin = (window as unknown as { paypal?: any }).paypal
+    if (!paypalWin || !paypalWin.Buttons) return
+
+    try {
+      paypalWin
+        .Buttons({
+          style: {
+            layout: 'vertical',
+            color: 'gold',
+            shape: 'rect',
+            label: 'paypal',
+            height: 44,
+          },
+          createOrder: async () => {
+            setError(null)
+            if (paymentAttempt?.paypal_order_id) {
+              return paymentAttempt.paypal_order_id
+            }
+            const attempt = await api.createPaymentAttempt(activeOrder.id, token)
+            setPaymentAttempt(attempt)
+            return attempt.paypal_order_id
+          },
+          onApprove: async () => {
+            setIsCapturing(true)
+            setError(null)
+            try {
+              const attemptId = paymentAttempt?.attempt_id || paymentAttempt?.id
+              if (!attemptId) {
+                throw new Error('Payment attempt ID missing')
+              }
+              const captured = await api.capturePayment(activeOrder.id, attemptId, token)
+              setPaymentAttempt(captured)
+              const refreshed = await api.getOrder(activeOrder.id, token)
+              setActiveOrder(refreshed)
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'PayPal capture failed')
+            } finally {
+              setIsCapturing(false)
+            }
+          },
+          onError: (err: any) => {
+            console.error('PayPal Button Error:', err)
+            setError(
+              err?.message || 'PayPal Checkout encountered an issue. You can also use the fallback button below.'
+            )
+          },
+        })
+        .render('#paypal-button-container')
+    } catch (e) {
+      console.warn('Failed to render PayPal Buttons:', e)
+    }
+  }, [sdkReady, isPaymentOpen, activeOrder?.id, token, paymentAttempt, setPaymentAttempt, setActiveOrder])
 
   if (!isPaymentOpen || !activeOrder) return null
 
@@ -141,6 +250,27 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
   const isCaptured = paymentAttempt?.status === 'captured'
   const isFailed = paymentAttempt?.status === 'capture_failed'
   const isApproved = paymentAttempt?.status === 'approved'
+  const isSandbox = paymentAttempt?.is_demo === false
+
+  const handleOpenPayPalSandbox = () => {
+    if (paymentAttempt?.approval_url) {
+      window.open(paymentAttempt.approval_url, '_blank', 'noopener,noreferrer')
+      setHasOpenedPayPalUrl(true)
+    }
+  }
+
+  // Auto-capture if shopper returns from PayPal approval redirect
+  useEffect(() => {
+    const hash = window.location.hash || ''
+    if (hash.includes('PayerID=') || hash.includes('/checkout/complete')) {
+      const search = hash.includes('?') ? hash.split('?')[1] : window.location.search.substring(1)
+      const params = new URLSearchParams(search)
+      const payerId = params.get('PayerID')
+      if (payerId && paymentAttempt && paymentAttempt.status !== 'captured' && !isCapturing) {
+        handleCapture(false)
+      }
+    }
+  }, [paymentAttempt, isCapturing])
 
   return (
     <div className="modal-backdrop" onClick={() => setIsPaymentOpen(false)}>
@@ -174,7 +304,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
             </div>
             <div>
               <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-text-primary)', margin: 0 }}>
-                Demo Payment Checkout
+                {isSandbox ? 'PayPal Sandbox Checkout' : 'Demo Payment Checkout'}
               </h2>
               <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
                 Order #{activeOrder.order_number || activeOrder.id.substring(0, 8)} &bull; Amount:{' '}
@@ -200,7 +330,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
           </button>
         </div>
 
-        {/* Prominent Demo Notice Banner */}
+        {/* Environment Notice Banner */}
         <div
           id="demo-payment-banner"
           style={{
@@ -218,7 +348,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <ShieldCheck size={16} color="var(--color-secondary)" />
-            <span style={{ fontWeight: 600 }}>Demo payment — no real payment processed</span>
+            <span style={{ fontWeight: 600 }}>
+              {isSandbox
+                ? paypalConfig?.mode === 'live'
+                  ? 'PayPal Live Production Environment — Official Orders API v2'
+                  : 'PayPal Sandbox Environment — Official Orders API v2'
+                : 'Demo payment — no real payment processed'}
+            </span>
           </div>
           <span
             style={{
@@ -232,7 +368,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
               fontWeight: 700,
             }}
           >
-            Synthetic Demo
+            {isSandbox ? 'PayPal Sandbox' : 'Synthetic Demo'}
           </span>
         </div>
 
@@ -290,11 +426,21 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--color-text-secondary)' }}>Demo Transaction ID:</span>
+                <span style={{ color: 'var(--color-text-secondary)' }}>
+                  {isSandbox ? 'PayPal Order ID:' : 'Demo Transaction ID:'}
+                </span>
                 <code style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--color-text-primary)' }}>
                   {paymentAttempt?.paypal_order_id}
                 </code>
               </div>
+              {paymentAttempt?.paypal_capture_id && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--color-text-secondary)' }}>PayPal Capture ID:</span>
+                  <code style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--color-success)' }}>
+                    {paymentAttempt.paypal_capture_id}
+                  </code>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--color-text-secondary)' }}>Captured Timestamp:</span>
                 <span style={{ fontWeight: 600 }}>
@@ -314,7 +460,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
                   borderTop: '1px solid var(--color-border)',
                 }}
               >
-                Note: Demo payment — no real payment processed.
+                {isSandbox
+                  ? 'Processed via PayPal Developer Sandbox Environment.'
+                  : 'Note: Demo payment — no real payment processed.'}
               </div>
             </div>
 
@@ -431,7 +579,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
                   fontSize: '0.85rem',
                 }}
               >
-                <span style={{ color: 'var(--color-text-secondary)' }}>Demo Order ID:</span>
+                <span style={{ color: 'var(--color-text-secondary)' }}>
+                  {isSandbox ? 'PayPal Order ID:' : 'Demo Order ID:'}
+                </span>
                 <span
                   style={{
                     fontFamily: 'var(--font-mono)',
@@ -456,9 +606,42 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
               </div>
             </div>
 
-            {/* Buyer Approval Simulation */}
+            {/* Buyer Approval Experience */}
             <div style={{ marginBottom: '20px' }}>
-              {isApproved ? (
+              {isSandbox ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* Native PayPal Smart Button container */}
+                  <div
+                    id="paypal-button-container"
+                    style={{ minHeight: '44px', width: '100%', marginBottom: '4px' }}
+                  />
+
+                  {/* Fallback button for popup blockers or direct window preference */}
+                  <div style={{ textAlign: 'center' }}>
+                    <button
+                      id="paypal-sandbox-approval-btn"
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{
+                        width: '100%',
+                        justifyContent: 'center',
+                        padding: '10px 14px',
+                        fontSize: '0.88rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                      }}
+                      onClick={handleOpenPayPalSandbox}
+                    >
+                      <ExternalLink size={16} />
+                      <span>{hasOpenedPayPalUrl ? 'Re-open PayPal in New Window' : 'Approve in PayPal Sandbox Window'}</span>
+                    </button>
+                    <span style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', display: 'block', marginTop: '6px', lineHeight: 1.4 }}>
+                      Uses your US Sandbox Personal (Buyer) account. Click <strong>Verify &amp; Capture</strong> below after approval.
+                    </span>
+                  </div>
+                </div>
+              ) : isApproved ? (
                 <div
                   style={{
                     background: 'rgba(21, 128, 61, 0.1)',
@@ -527,7 +710,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
                 <span>Backend Capture Verification Gate:</span>
               </div>
               <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginBottom: '14px', lineHeight: 1.4 }}>
-                Verifies payment authorization, transitions order to paid, and atomically commits inventory hold.
+                {isSandbox
+                  ? 'Authoritatively verifies payment with PayPal Orders API v2, commits inventory hold, and marks order paid.'
+                  : 'Verifies payment authorization, transitions order to paid, and atomically commits inventory hold.'}
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <button
@@ -538,23 +723,29 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
                   onClick={() => handleCapture(false)}
                   disabled={isCapturing}
                 >
-                  {isCapturing ? 'Verifying with Backend...' : 'Verify & Capture Demo Payment'}
+                  {isCapturing
+                    ? 'Verifying with PayPal...'
+                    : isSandbox
+                    ? 'Verify & Capture PayPal Sandbox Payment'
+                    : 'Verify & Capture Demo Payment'}
                 </button>
-                <button
-                  id="simulate-failure-btn"
-                  type="button"
-                  className="btn btn-ghost"
-                  style={{
-                    width: '100%',
-                    justifyContent: 'center',
-                    fontSize: '0.8rem',
-                    color: 'var(--color-error)',
-                  }}
-                  onClick={() => handleCapture(true)}
-                  disabled={isCapturing}
-                >
-                  Simulate Payment Failure (Test Retry Flow)
-                </button>
+                {!isSandbox && (
+                  <button
+                    id="simulate-failure-btn"
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{
+                      width: '100%',
+                      justifyContent: 'center',
+                      fontSize: '0.8rem',
+                      color: 'var(--color-error)',
+                    }}
+                    onClick={() => handleCapture(true)}
+                    disabled={isCapturing}
+                  >
+                    Simulate Payment Failure (Test Retry Flow)
+                  </button>
+                )}
               </div>
             </div>
           </div>

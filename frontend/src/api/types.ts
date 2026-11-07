@@ -189,6 +189,7 @@ export interface PaymentAttemptData {
   attempt_number?: number
   idempotency_key?: string
   paypal_order_id?: string | null
+  paypal_capture_id?: string | null
   approval_url?: string | null
   status: string
   amount_minor?: number
@@ -198,6 +199,13 @@ export interface PaymentAttemptData {
   created_at?: string
   is_demo?: boolean
   demo_notice?: string | null
+}
+
+export interface PayPalPublicConfig {
+  client_id: string | null
+  mode: string
+  currency: string
+  is_demo: boolean
 }
 
 export interface OrderData {

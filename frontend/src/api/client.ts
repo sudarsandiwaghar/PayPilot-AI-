@@ -15,6 +15,7 @@ import type {
   CheckoutPreview,
   OrderData,
   PaginatedResponse,
+  PayPalPublicConfig,
   PaymentAttemptData,
   ProductDetail,
   ProductFilterParams,
@@ -283,6 +284,36 @@ export const api = {
     return attempt
   },
 
+  async createPayPalOrder(orderId: string, token: string): Promise<PaymentAttemptData> {
+    const attempt = await request<PaymentAttemptData>(
+      `/api/payments/paypal/orders`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ order_id: orderId }),
+      },
+      token
+    )
+    attempt.id = attempt.attempt_id
+    return attempt
+  },
+
+  async capturePayPalOrder(
+    orderId: string,
+    token: string,
+    options?: { attempt_id?: string; simulate_failure?: boolean; failure_reason?: string }
+  ): Promise<PaymentAttemptData> {
+    const attempt = await request<PaymentAttemptData>(
+      `/api/payments/paypal/orders/${orderId}/capture`,
+      {
+        method: 'POST',
+        body: options ? JSON.stringify(options) : undefined,
+      },
+      token
+    )
+    attempt.id = attempt.attempt_id
+    return attempt
+  },
+
   async approvePayment(
     orderId: string,
     attemptId: string,
@@ -325,6 +356,10 @@ export const api = {
       })
     }
     return order
+  },
+
+  async getPayPalConfig(): Promise<PayPalPublicConfig> {
+    return await request<PayPalPublicConfig>('/api/v1/paypal/config', { method: 'GET' })
   },
 
   async listSessionOrders(sessionId: string, token: string): Promise<OrderData[]> {

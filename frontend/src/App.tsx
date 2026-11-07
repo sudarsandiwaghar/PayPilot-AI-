@@ -42,6 +42,8 @@ export function App() {
         setCurrentView('compare')
       } else if (hash.startsWith('#/orders')) {
         setCurrentView('orders')
+      } else if (hash.startsWith('#/checkout/complete') || hash.startsWith('#/checkout/cancel')) {
+        setCurrentView('orders')
       } else if (hash.startsWith('#/dashboard')) {
         setCurrentView('dashboard')
       } else {

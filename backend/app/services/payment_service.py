@@ -125,6 +125,7 @@ class PaymentService:
         db: AsyncSession,
         order_id: UUID,
         idempotency_key: str | None = None,
+        return_url_base: str | None = None,
     ) -> tuple[PaymentAttempt, str]:
         """Create a new payment attempt for an order.
 
@@ -192,6 +193,7 @@ class PaymentService:
                     "PayPal OAuth authentication failed: Unable to obtain access token in sandbox/live mode."
                 )
             amount_val = f"{order.total_minor / 100:.2f}"
+            base_frontend = (return_url_base or "http://localhost:5174").rstrip("/")
             payload = {
                 "intent": "CAPTURE",
                 "purchase_units": [
@@ -203,6 +205,13 @@ class PaymentService:
                         },
                     }
                 ],
+                "application_context": {
+                    "brand_name": "PayPilot AI",
+                    "landing_page": "NO_PREFERENCE",
+                    "user_action": "PAY_NOW",
+                    "return_url": f"{base_frontend}/#/checkout/complete",
+                    "cancel_url": f"{base_frontend}/#/checkout/cancel",
+                },
             }
             headers = {
                 "Authorization": f"Bearer {access_token}",
@@ -218,7 +227,7 @@ class PaymentService:
                     data = res.json()
                     paypal_order_id = data["id"]
                     approval_url = next(
-                        (lnk["href"] for lnk in data.get("links", []) if lnk.get("rel") == "approve"),
+                        (lnk["href"] for lnk in data.get("links", []) if lnk.get("rel") in ("approve", "payer-action")),
                         f"https://www.sandbox.paypal.com/checkoutnow?token={paypal_order_id}",
                     )
                 else:
@@ -401,6 +410,13 @@ class PaymentService:
                     if status == "COMPLETED":
                         attempt.status = "captured"
                         attempt.captured_at = datetime.now(UTC)
+                        captures = (
+                            data.get("purchase_units", [{}])[0]
+                            .get("payments", {})
+                            .get("captures", [])
+                        )
+                        capture_id = captures[0].get("id") if captures else None
+                        attempt.paypal_capture_id = capture_id
                         order.status = "paid"
                         await StockService.commit_reservations_for_order(db, order.id)
                     else:
@@ -424,6 +440,8 @@ class PaymentService:
             attempt.captured_at = datetime.now(UTC)
             if not attempt.paypal_payer_id:
                 attempt.paypal_payer_id = f"DEMO-PAYER-{secrets.token_hex(4).upper()}"
+            if not attempt.paypal_capture_id:
+                attempt.paypal_capture_id = f"DEMO-CAP-{secrets.token_hex(8).upper()}"
             order.status = "paid"
             await StockService.commit_reservations_for_order(db, order.id)
 

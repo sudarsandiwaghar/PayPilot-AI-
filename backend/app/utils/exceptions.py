@@ -247,6 +247,18 @@ class LLMProviderNotConfigured(PayPilotError):
         )
 
 
+class LLMProviderUnavailable(PayPilotError):
+    def __init__(
+        self,
+        message: str = "AI service is currently unavailable. Please check API key configuration or try again shortly.",
+    ) -> None:
+        super().__init__(
+            code="LLM_PROVIDER_UNAVAILABLE",
+            message=message,
+            status_code=502,
+        )
+
+
 class ToolExecutionForbidden(PayPilotError):
     def __init__(self, tool_name: str) -> None:
         super().__init__(

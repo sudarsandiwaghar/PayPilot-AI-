@@ -81,6 +81,12 @@ class PaymentAttempt(Base):
         String(64),
         nullable=True,
     )
+    paypal_capture_id: Mapped[str | None] = mapped_column(
+        String(64),
+        unique=True,
+        nullable=True,
+        index=True,
+    )
     approval_url: Mapped[str | None] = mapped_column(
         String(512),
         nullable=True,

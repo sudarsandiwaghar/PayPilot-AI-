@@ -98,7 +98,7 @@ class Settings(BaseSettings):
         description="API key for configured LLM provider. Must never be logged or exposed.",
     )
     llm_model: str = Field(
-        default="gemini-3.5-flash",
+        default="gemini-flash-lite-latest",
         validation_alias=AliasChoices("llm_model", "gemini_model"),
         description="Model name to invoke for shopping agent tasks.",
     )

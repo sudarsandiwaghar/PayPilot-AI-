@@ -188,6 +188,10 @@ def create_app() -> FastAPI:
     # ── Routes ───────────────────────────────────────────────
     app.include_router(v1_router)
 
+    # Hackathon direct aliases without version prefix (/api/payments/...)
+    from app.api.v1.payments import router as payments_router
+    app.include_router(payments_router, prefix="/api")
+
     return app
 
 

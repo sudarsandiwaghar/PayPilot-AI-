@@ -25,6 +25,9 @@ from app.models.order import Order
 from app.models.payment import PaymentAttempt
 from app.schemas.common import ApiResponse
 from app.schemas.payment import (
+    PayPalOrderCaptureRequest,
+    PayPalOrderCreateRequest,
+    PayPalPublicConfig,
     PaymentApproveResponse,
     PaymentAttemptOut,
     PaymentCaptureRequest,
@@ -33,7 +36,7 @@ from app.schemas.payment import (
 )
 from app.services.payment_service import PaymentService
 from app.services.stock_service import StockService
-from app.utils.exceptions import SessionInactive
+from app.utils.exceptions import PaymentAttemptNotFound, SessionInactive
 
 router = APIRouter(tags=["Payments"])
 
@@ -44,6 +47,25 @@ def _build_meta(request: Request) -> dict:
         "request_id": request_id,
         "timestamp": datetime.now(UTC).isoformat(),
     }
+
+
+@router.get(
+    "/paypal/config",
+    response_model=ApiResponse[PayPalPublicConfig],
+    summary="Get public PayPal configuration",
+    description="Returns public PayPal configuration for the frontend SDK.",
+)
+async def get_paypal_public_config(request: Request) -> ApiResponse[PayPalPublicConfig]:
+    from app.config import get_settings
+    settings = get_settings()
+    is_demo = PaymentService.is_demo_mode(settings)
+    data = PayPalPublicConfig(
+        client_id=settings.paypal_client_id if not is_demo and settings.paypal_client_id else None,
+        mode=settings.paypal_mode,
+        currency=settings.default_currency,
+        is_demo=is_demo,
+    )
+    return ApiResponse(data=data, meta=_build_meta(request))
 
 
 @router.post(
@@ -62,10 +84,19 @@ async def create_payment(
     if order.session and order.session.status != "active":
         raise SessionInactive(order.session.status)
 
+    origin = request.headers.get("origin")
+    if not origin:
+        referer = request.headers.get("referer", "")
+        if referer:
+            from urllib.parse import urlparse
+            p = urlparse(referer)
+            origin = f"{p.scheme}://{p.netloc}"
+
     attempt, approval_url = await PaymentService.create_payment_attempt(
         db=db,
         order_id=order_id,
         idempotency_key=idempotency_key,
+        return_url_base=origin,
     )
     is_demo = PaymentService.is_demo_mode()
     data = PaymentCreateResponse(
@@ -146,6 +177,103 @@ async def capture_payment(
         status=attempt.status,
         failure_reason=attempt.failure_reason,
         captured_at=attempt.captured_at,
+        paypal_capture_id=attempt.paypal_capture_id,
+        is_demo=is_demo,
+        demo_notice="Demo payment — no real payment processed" if is_demo else None,
+    )
+    return ApiResponse(data=data, meta=_build_meta(request))
+
+
+@router.post(
+    "/payments/paypal/orders",
+    response_model=ApiResponse[PaymentCreateResponse],
+    summary="Create PayPal Sandbox Order",
+    description="Official PayPal Orders API v2 integration endpoint. Creates a PayPal order with intent=CAPTURE.",
+)
+async def create_paypal_order(
+    request: Request,
+    body: PayPalOrderCreateRequest,
+    authorization: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PaymentCreateResponse]:
+    order = await verify_order_access(order_id=body.order_id, authorization=authorization, db=db)
+    if order.session and order.session.status != "active":
+        raise SessionInactive(order.session.status)
+
+    origin = request.headers.get("origin")
+    if not origin:
+        referer = request.headers.get("referer", "")
+        if referer:
+            from urllib.parse import urlparse
+            p = urlparse(referer)
+            origin = f"{p.scheme}://{p.netloc}"
+
+    attempt, approval_url = await PaymentService.create_payment_attempt(
+        db=db,
+        order_id=body.order_id,
+        idempotency_key=idempotency_key,
+        return_url_base=origin,
+    )
+    is_demo = PaymentService.is_demo_mode()
+    data = PaymentCreateResponse(
+        attempt_id=attempt.id,
+        attempt_number=attempt.attempt_number,
+        idempotency_key=attempt.idempotency_key,
+        paypal_order_id=attempt.paypal_order_id or "",
+        approval_url=approval_url,
+        status=attempt.status,
+        is_demo=is_demo,
+        demo_notice="Demo payment — no real payment processed" if is_demo else None,
+    )
+    return ApiResponse(data=data, meta=_build_meta(request))
+
+
+@router.post(
+    "/payments/paypal/orders/{order_id}/capture",
+    response_model=ApiResponse[PaymentCaptureResponse],
+    summary="Capture PayPal Sandbox Order",
+    description="Captures PayPal order, verifies authoritative response, and commits stock reservations.",
+)
+async def capture_paypal_order(
+    request: Request,
+    order_id: UUID,
+    body: PayPalOrderCaptureRequest | None = None,
+    order: Order = Depends(verify_order_access),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PaymentCaptureResponse]:
+    if order.session and order.session.status != "active":
+        raise SessionInactive(order.session.status)
+
+    attempt_id = body.attempt_id if body and body.attempt_id else None
+    if not attempt_id:
+        stmt = (
+            select(PaymentAttempt)
+            .where(PaymentAttempt.order_id == order_id)
+            .order_by(PaymentAttempt.attempt_number.desc())
+        )
+        latest_attempt = (await db.execute(stmt)).scalars().first()
+        if not latest_attempt:
+            raise PaymentAttemptNotFound(f"No payment attempt found for order {order_id}")
+        attempt_id = latest_attempt.id
+
+    simulated_failure_reason = None
+    if body and body.simulate_failure:
+        simulated_failure_reason = body.failure_reason or "Simulated payment failure (insufficient funds in demo mode)"
+
+    attempt = await PaymentService.capture_payment_attempt(
+        db=db,
+        order_id=order_id,
+        attempt_id=attempt_id,
+        simulated_failure_reason=simulated_failure_reason,
+    )
+    is_demo = PaymentService.is_demo_mode()
+    data = PaymentCaptureResponse(
+        attempt_id=attempt.id,
+        status=attempt.status,
+        failure_reason=attempt.failure_reason,
+        captured_at=attempt.captured_at,
+        paypal_capture_id=attempt.paypal_capture_id,
         is_demo=is_demo,
         demo_notice="Demo payment — no real payment processed" if is_demo else None,
     )

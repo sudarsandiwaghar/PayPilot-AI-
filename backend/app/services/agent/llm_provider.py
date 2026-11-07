@@ -11,6 +11,8 @@ Provides:
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
 from typing import Any, Protocol
@@ -19,11 +21,12 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.schemas.agent import (
+    LLMStructuredIntentExtract,
     ShoppingAgentRequest,
     ShoppingConstraint,
     ShoppingIntent,
 )
-from app.utils.exceptions import LLMProviderNotConfigured
+from app.utils.exceptions import LLMProviderNotConfigured, LLMProviderUnavailable
 
 logger = logging.getLogger("paypilot.llm_provider")
 
@@ -152,10 +155,38 @@ class MockLLMProvider:
                 except ValueError:
                     pass
 
+        # Detect brand preferences
+        brand_prefs: list[str] = []
+        known_brands = ["apple", "sony", "bose", "dell", "asus", "logitech", "samsung", "lg", "keychron"]
+        for b in known_brands:
+            if b in lower_q:
+                brand_prefs.append(b.capitalize())
+
+        # Detect ranking priorities
+        ranking_priorities: list[str] = []
+        if any(w in lower_q for w in ["cheap", "budget", "affordable", "price"]):
+            ranking_priorities.append("price")
+        if any(w in lower_q for w in ["battery", "endurance"]):
+            ranking_priorities.append("battery")
+        if any(w in lower_q for w in ["mic", "microphone"]):
+            ranking_priorities.append("microphone")
+        if any(w in lower_q for w in ["rating", "best", "top"]):
+            ranking_priorities.append("rating")
+        if not ranking_priorities:
+            ranking_priorities = ["rating", "price"]
+
+        # Detect excluded features
+        excluded_features: list[str] = []
+        exclude_match = re.search(r"(?:without|no|exclude|excluding)\s+([a-z\s-]+?)(?:\s+(?:under|budget|with|for)|$)", lower_q)
+        if exclude_match:
+            ex_val = exclude_match.group(1).strip()
+            if ex_val:
+                excluded_features.append(ex_val)
+
         # Extract features
         features = list(request.required_features)
         for kw in COMMON_FEATURE_KEYWORDS:
-            if kw in lower_q and kw not in features:
+            if kw in lower_q and kw not in features and kw not in excluded_features:
                 features.append(kw)
 
         # If no category and no features and query is short, flag ambiguous
@@ -167,6 +198,9 @@ class MockLLMProvider:
                     category=None,
                     budget_minor=None,
                     currency=request.currency,
+                    excluded_features=excluded_features,
+                    brand_preferences=brand_prefs,
+                    ranking_priorities=ranking_priorities,
                 ),
                 ambiguity_detected=True,
                 clarification_questions=[
@@ -186,6 +220,9 @@ class MockLLMProvider:
                 currency=request.currency,
                 required_features=features,
                 preferences=list(request.preferences),
+                excluded_features=excluded_features,
+                brand_preferences=brand_prefs,
+                ranking_priorities=ranking_priorities,
             ),
             ambiguity_detected=False,
             clarification_questions=[],
@@ -224,7 +261,7 @@ class MockLLMProvider:
 class GeminiLLMProvider:
     """Live provider boundary calling Google Gemini API."""
 
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash", base_url: str = "") -> None:
+    def __init__(self, api_key: str, model: str = "gemini-flash-lite-latest", base_url: str = "") -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = (
@@ -233,23 +270,156 @@ class GeminiLLMProvider:
             else "https://generativelanguage.googleapis.com/v1beta"
         )
 
+    def _sanitize_error(self, message: str) -> str:
+        """Redact API key from any error messages to prevent leakage."""
+        if self.api_key and self.api_key in message:
+            return message.replace(self.api_key, "[REDACTED_API_KEY]")
+        return message
+
     async def parse_intent(self, request: ShoppingAgentRequest) -> ShoppingIntent:
-        """Call Gemini API to extract structured intent from query."""
+        """Call Gemini API with structured schema validation and retry limits."""
         url = f"{self.base_url}/models/{self.model}:generateContent"
         headers = {
             "x-goog-api-key": self.api_key,
             "Content-Type": "application/json",
         }
         prompt = (
-            f"You are PayPilot Shopping Assistant. Extract structured shopping constraints from this user query:\n"
-            f"Query: {request.query}\n"
-            f"Known categories: {KNOWN_CATEGORIES}\n"
-            f"Return JSON strictly with fields: category (str or null), budget_minor (int cents or null), "
-            f"required_features (list[str]), preferences (list[str]), is_ambiguous (bool), clarification_questions (list[str])."
+            "You are PayPilot Autonomous Shopping Assistant. "
+            "Analyze the shopper's natural language request and extract structured constraints.\n"
+            f"User Query: {request.query}\n"
+            f"Known Catalog Categories: {KNOWN_CATEGORIES}\n"
+            "Return a strictly valid JSON object conforming to this schema:\n"
+            "{\n"
+            '  "category": string or null (one of the known categories or closest match),\n'
+            '  "max_budget": number or null (budget in currency units, e.g. 50.00),\n'
+            '  "currency": string (e.g. "USD"),\n'
+            '  "preferences": array of strings (nice-to-have features),\n'
+            '  "required_features": array of strings (must-have specifications),\n'
+            '  "excluded_features": array of strings (features or attributes the shopper explicitly does NOT want),\n'
+            '  "brand_preferences": array of strings (specific brands requested),\n'
+            '  "ranking_priorities": array of strings (e.g. ["battery", "microphone", "price"]),\n'
+            '  "is_ambiguous": boolean (true if query lacks actionable category or specs),\n'
+            '  "clarification_questions": array of strings (questions to ask if ambiguous)\n'
+            "}\n"
+            "Do not invent product prices or fabricate specifications."
         )
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"response_mime_type": "application/json"},
+        }
+
+        max_retries = 2
+        last_error = ""
+
+        for attempt in range(max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    res = await client.post(url, json=payload, headers=headers)
+                    if res.status_code == 200:
+                        data = res.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
+                            # Strip markdown wrappers if returned
+                            clean_text = raw_text.strip()
+                            if clean_text.startswith("```json"):
+                                clean_text = clean_text[7:]
+                            if clean_text.startswith("```"):
+                                clean_text = clean_text[3:]
+                            if clean_text.endswith("```"):
+                                clean_text = clean_text[:-3]
+                            clean_text = clean_text.strip()
+
+                            parsed = LLMStructuredIntentExtract.model_validate_json(clean_text)
+
+                            budget_minor = parsed.budget_minor
+                            if budget_minor is None and parsed.max_budget is not None:
+                                budget_minor = int(round(parsed.max_budget * 100))
+                            if budget_minor is None:
+                                budget_minor = request.budget_minor
+                            if budget_minor is None:
+                                # Fallback regex extraction from query text if LLM omitted budget
+                                budget_match = re.search(r"\$\s*(\d+(?:\.\d{1,2})?)", request.query)
+                                if not budget_match:
+                                    budget_match = re.search(r"(?:under|budget|max|below)\s+(\d+(?:\.\d{1,2})?)", request.query.lower())
+                                if budget_match:
+                                    try:
+                                        budget_minor = int(round(float(budget_match.group(1)) * 100))
+                                    except ValueError:
+                                        pass
+
+                            is_amb = parsed.is_ambiguous
+                            intent_type = "clarification_needed" if is_amb else "recommendation"
+                            if "compare" in request.query.lower() or " vs " in request.query.lower():
+                                intent_type = "comparison"
+
+                            return ShoppingIntent(
+                                raw_query=request.query,
+                                intent_type=intent_type,
+                                constraints=ShoppingConstraint(
+                                    category=parsed.category or request.category,
+                                    budget_minor=budget_minor,
+                                    currency=parsed.currency or request.currency,
+                                    required_features=parsed.required_features or list(request.required_features),
+                                    preferences=parsed.preferences or list(request.preferences),
+                                    excluded_features=parsed.excluded_features,
+                                    brand_preferences=parsed.brand_preferences,
+                                    ranking_priorities=parsed.ranking_priorities or ["rating", "price"],
+                                ),
+                                ambiguity_detected=is_amb,
+                                clarification_questions=parsed.clarification_questions,
+                            )
+                        else:
+                            last_error = "Gemini returned empty candidates list."
+                    elif res.status_code in (401, 403):
+                        safe_msg = self._sanitize_error(res.text[:300])
+                        raise LLMProviderUnavailable(
+                            f"Gemini API authentication failed (HTTP {res.status_code}). Please verify GEMINI_API_KEY: {safe_msg}"
+                        )
+                    else:
+                        last_error = f"Gemini API returned HTTP {res.status_code}: {res.text[:300]}"
+                        if res.status_code < 500:
+                            # Client error (4xx) - no use retrying
+                            break
+            except LLMProviderUnavailable:
+                raise
+            except httpx.RequestError as exc:
+                last_error = f"Gemini API network error: {type(exc).__name__}"
+            except Exception as exc:
+                last_error = f"Unexpected Gemini API error: {type(exc).__name__} ({str(exc)})"
+
+            if attempt < max_retries:
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+        safe_err = self._sanitize_error(last_error)
+        logger.error("Gemini intent extraction failed after %d attempts: %s", max_retries + 1, safe_err)
+        raise LLMProviderUnavailable(
+            f"AI shopping assistant is currently unavailable: {safe_err}. Check your LLM configuration and network connectivity."
+        )
+
+    async def generate_explanation(
+        self,
+        product: dict[str, Any],
+        intent: ShoppingIntent,
+    ) -> str:
+        """Call Gemini to generate grounded product explanation citing verified specs."""
+        url = f"{self.base_url}/models/{self.model}:generateContent"
+        headers = {
+            "x-goog-api-key": self.api_key,
+            "Content-Type": "application/json",
+        }
+        prompt = (
+            "You are PayPilot Shopping Assistant. Write a concise, 2-sentence recommendation explanation "
+            "for this product based strictly on the verified catalog data provided below.\n"
+            f"Shopper Request: {intent.raw_query}\n"
+            f"Product Catalog Data: {json.dumps(product)}\n"
+            "STRICT RULES:\n"
+            "1. Cite only factual specs, rating, and source evidence present in the product catalog data.\n"
+            "2. Do NOT invent specifications, benchmark numbers, or merchant names."
+        )
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2},
         }
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -258,42 +428,14 @@ class GeminiLLMProvider:
                     data = res.json()
                     candidates = data.get("candidates", [])
                     if candidates:
-                        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
-                        import json
-
-                        parsed = json.loads(text)
-                        is_amb = parsed.get("is_ambiguous", False)
-                        return ShoppingIntent(
-                            raw_query=request.query,
-                            intent_type="clarification_needed" if is_amb else "recommendation",
-                            constraints=ShoppingConstraint(
-                                category=parsed.get("category") or request.category,
-                                budget_minor=parsed.get("budget_minor") or request.budget_minor,
-                                currency=request.currency,
-                                required_features=parsed.get("required_features") or request.required_features,
-                                preferences=parsed.get("preferences") or request.preferences,
-                            ),
-                            ambiguity_detected=is_amb,
-                            clarification_questions=parsed.get("clarification_questions", []),
-                        )
-                else:
-                    logger.warning("Gemini API returned status %s: %s", res.status_code, res.text[:200])
+                        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                        if text:
+                            return text
         except Exception as exc:
-            err_msg = str(exc)
-            if self.api_key and self.api_key in err_msg:
-                err_msg = err_msg.replace(self.api_key, "[REDACTED_API_KEY]")
-            logger.warning("Gemini intent parsing failed, falling back to deterministic extraction: %s", err_msg)
+            safe_err = self._sanitize_error(str(exc))
+            logger.warning("Gemini explanation generation failed, using factual spec builder: %s", safe_err)
 
-        # Fallback to offline deterministic parsing if live call fails
-        mock = MockLLMProvider()
-        return await mock.parse_intent(request)
-
-    async def generate_explanation(
-        self,
-        product: dict[str, Any],
-        intent: ShoppingIntent,
-    ) -> str:
-        # Fall back to grounded evidence builder to guarantee zero hallucinations
+        # Fall back to grounded deterministic spec builder if live explanation is unreachable
         mock = MockLLMProvider()
         return await mock.generate_explanation(product, intent)
 

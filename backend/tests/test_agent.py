@@ -163,12 +163,13 @@ async def test_tool_allowlisting_strict_enforcement(db_session: AsyncSession) ->
 
 
 @pytest.mark.asyncio
-async def test_gemini_fallback_and_secret_safe_logging(caplog: pytest.LogCaptureFixture) -> None:
-    """Verify GeminiLLMProvider falls back gracefully on network error and never logs API key."""
+async def test_gemini_network_error_raises_and_never_logs_secret(caplog: pytest.LogCaptureFixture) -> None:
+    """Verify GeminiLLMProvider raises LLMProviderUnavailable on network failure without logging API key."""
     import logging
 
     from app.schemas.agent import ShoppingAgentRequest
     from app.services.agent.llm_provider import GeminiLLMProvider
+    from app.utils.exceptions import LLMProviderUnavailable
 
     secret_key = "AIzaSySecretTestKey123456789"
     # Point base_url to an unreachable port to trigger connection error
@@ -176,15 +177,74 @@ async def test_gemini_fallback_and_secret_safe_logging(caplog: pytest.LogCapture
 
     req = ShoppingAgentRequest(query="Find wireless headphones under $200")
     with caplog.at_level(logging.WARNING):
+        with pytest.raises(LLMProviderUnavailable) as exc_info:
+            await provider.parse_intent(req)
+
+    # Must raise meaningful error rather than faking success
+    assert "AI shopping assistant is currently unavailable" in str(exc_info.value)
+    assert exc_info.value.code == "LLM_PROVIDER_UNAVAILABLE"
+    assert exc_info.value.status_code == 502
+
+    # Ensure the secret key was never written to logs or error message
+    assert secret_key not in caplog.text
+    assert secret_key not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_gemini_structured_schema_parsing() -> None:
+    """Verify GeminiLLMProvider successfully parses structured schema output into typed ShoppingIntent."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.schemas.agent import ShoppingAgentRequest
+    from app.services.agent.llm_provider import GeminiLLMProvider
+
+    mock_gemini_response = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "text": (
+                                '{\n'
+                                '  "category": "Audio",\n'
+                                '  "max_budget": 150.00,\n'
+                                '  "currency": "USD",\n'
+                                '  "preferences": ["long battery life"],\n'
+                                '  "required_features": ["noise-canceling", "bluetooth"],\n'
+                                '  "excluded_features": ["wired"],\n'
+                                '  "brand_preferences": ["Sony", "Bose"],\n'
+                                '  "ranking_priorities": ["battery", "noise-canceling", "price"],\n'
+                                '  "is_ambiguous": false,\n'
+                                '  "clarification_questions": []\n'
+                                '}'
+                            )
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+    provider = GeminiLLMProvider(api_key="test-api-key")
+    req = ShoppingAgentRequest(query="Find Sony or Bose noise-canceling headphones under $150 with good battery")
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = mock_gemini_response
+        mock_post.return_value = mock_resp
+
         intent = await provider.parse_intent(req)
 
-    # Must fall back gracefully to deterministic intent
-    assert intent is not None
-    assert intent.constraints.category == "Audio"
-    assert intent.constraints.budget_minor == 20000
-
-    # Ensure the secret key was never written to logs
-    assert secret_key not in caplog.text
+        assert intent is not None
+        assert intent.constraints.category == "Audio"
+        assert intent.constraints.budget_minor == 15000
+        assert intent.constraints.currency == "USD"
+        assert "noise-canceling" in intent.constraints.required_features
+        assert "Sony" in intent.constraints.brand_preferences
+        assert "wired" in intent.constraints.excluded_features
+        assert intent.constraints.ranking_priorities == ["battery", "noise-canceling", "price"]
+        assert intent.ambiguity_detected is False
 
 
 # ── End-to-End Decision Layer Tests with Mock Provider ────────────

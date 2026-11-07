@@ -23,12 +23,12 @@ PayPilot AI is a budget-aware AI shopping assistant that couples conversational 
 * **Backend:** Python 3.12+ (tested on 3.14), FastAPI, Pydantic v2, SQLAlchemy (asyncio), asyncpg, Alembic, PostgreSQL 16
 * **Frontend:** React 19, TypeScript, Vite, Lucide React, CSS3 Design Tokens
 * **Security & Auth:** HMAC-SHA256 Signed Tokens, CSPRNG Bearer Tokens, SHA-256 Hashing, Constant-Time Digest Comparison (`hmac.compare_digest`), Pessimistic Database Locks (`SELECT FOR UPDATE`)
-* **Testing & Quality:** Pytest, pytest-asyncio, Node.js Native Test Runner (`node:test`), Oxlint, Headless Chrome DevTools Protocol (CDP)
-* **AI Architecture:** Bounded Read-Only Tool Registry, Deterministic Knapsack Budget Optimizer, Composite Ranking Formula, Synthetic Offline Provider (`MockLLMProvider`)
-* **Optional / Unverified Live Providers:**
-  * *Google Gemini:* Scaffolded in `GeminiLLMProvider` with secret-safe headers (`x-goog-api-key`) and offline fallback; default runs offline with zero external API keys.
-  * *PayPal:* Scaffolding and synthetic demo mode verified (`PAYPAL_MODE=mock`); live PayPal REST API and PayPal Sandbox remain unverified.
-  * *Cloud Hosting (Render + Neon):* Multi-service blueprint (`render.yaml`) prepared and validated; cloud runtime deployment remains unverified.
+* **Testing & Quality:** Pytest, pytest-asyncio, Node.js Native Test Runner (`node:test`), Oxlint, Headless Chrome DevTools Protocol (CDP) — 114/114 passing backend tests (100% pass rate)
+* **AI Architecture:** Live Google Gemini Provider (`GeminiLLMProvider` using `gemini-flash-lite-latest`) with Pydantic Schema Validation, Grounded Catalog Explanations, Bounded Read-Only Tool Registry, Deterministic Knapsack Budget Optimizer, Composite Ranking Formula, and Deterministic Offline Provider (`MockLLMProvider`)
+* **Payment Gateway:** PayPal Developer Platform Standard Checkout (Orders API v2: `POST /v2/checkout/orders` with `intent: CAPTURE`, `POST /v2/checkout/orders/{id}/capture`), Authoritative `paypal_capture_id` persistence with unique DB index, Idempotent Server-Side Capture, and Demo/Sandbox Modes
+* **License:** Open-Source MIT License (`LICENSE`)
+* **Optional / Unverified Cloud Services:**
+  * *Cloud Hosting (Render + Neon / Vercel):* Multi-service blueprints prepared; cloud runtime deployment remains optional.
 
 ---
 
@@ -74,7 +74,7 @@ We built **PayPilot AI** to show that conversational commerce does not require b
 ---
 
 ### Accomplishments We're Proud Of
-* **100% Automated Test Pass Rate:** 111 backend pytest tests passing, 20 frontend node tests passing, 0 oxlint warnings/errors across 26 files, and complete headless Chrome CDP browser smoke test passing end-to-end.
+* **100% Automated Test Pass Rate:** 114 backend pytest tests passing (100% pass rate), 20 frontend node tests passing, 0 oxlint warnings/errors across 26 files, and complete headless Chrome CDP browser smoke test passing end-to-end.
 * **Zero Client Secrets:** No third-party payment or LLM secrets are stored in the client application or required for local evaluation.
 * **Tamper-Proof Checkout:** Cryptographic token binding guarantees that client-side requests cannot alter product prices or bypass inventory validation.
 

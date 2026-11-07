@@ -623,3 +623,170 @@ async def test_demo_order_receipt_and_history_shows_demo_notice(
     assert len(sess_orders) >= 1
     assert sess_orders[0]["is_demo_payment"] is True
     assert "Demo payment" in sess_orders[0]["demo_notice"]
+
+
+# ── Hackathon PayPal Specific Endpoints & Sandbox Flow Tests ──────
+
+@pytest.mark.asyncio
+async def test_paypal_orders_api_direct_endpoints(
+    client: AsyncClient, placed_order: dict
+) -> None:
+    """Verify POST /api/payments/paypal/orders and POST /api/payments/paypal/orders/{id}/capture."""
+    order_id = placed_order["order"]["id"]
+    headers = placed_order["headers"]
+
+    # 1. Create PayPal Order via /api/payments/paypal/orders
+    resp = await client.post(
+        "/api/payments/paypal/orders",
+        json={"order_id": order_id},
+        headers={**headers, "Idempotency-Key": "ik_paypal_orders_direct"},
+    )
+    assert resp.status_code == 200
+    create_data = resp.json()["data"]
+    assert create_data["paypal_order_id"] != ""
+    assert "approval_url" in create_data
+    assert create_data["status"] == "created"
+
+    # 2. Capture PayPal Order via /api/payments/paypal/orders/{order_id}/capture
+    cap_resp = await client.post(
+        f"/api/payments/paypal/orders/{order_id}/capture",
+        json={"attempt_id": create_data["attempt_id"]},
+        headers=headers,
+    )
+    assert cap_resp.status_code == 200
+    cap_data = cap_resp.json()["data"]
+    assert cap_data["status"] == "captured"
+    assert cap_data["paypal_capture_id"] is not None
+    assert cap_data["captured_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_paypal_sandbox_live_rest_v2_flow(
+    client: AsyncClient, placed_order: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify PayPal Sandbox REST v2 OAuth, order creation, and capture with authoritative capture ID."""
+    from unittest.mock import AsyncMock, patch
+    from app import config
+
+    order_id = placed_order["order"]["id"]
+    headers = placed_order["headers"]
+
+    # Configure Sandbox settings
+    settings = config.get_settings()
+    monkeypatch.setattr(settings, "paypal_mode", "sandbox")
+    monkeypatch.setattr(settings, "paypal_client_id", "A_SANDBOX_CLIENT_ID_123")
+    monkeypatch.setattr(settings, "paypal_client_secret", "A_SANDBOX_CLIENT_SECRET_456")
+    monkeypatch.setattr(settings, "paypal_base_url", "https://api-m.sandbox.paypal.com")
+    clear_paypal_token_cache()
+
+    mock_oauth_resp = {
+        "scope": "https://api.paypal.com/v1/payments/.*",
+        "access_token": "ACCESS_TOKEN_SANDBOX_XYZ_789",
+        "token_type": "Bearer",
+        "app_id": "APP-SANDBOX-123",
+        "expires_in": 32400,
+    }
+
+    mock_create_order_resp = {
+        "id": "5O190127TN364715T",
+        "status": "CREATED",
+        "intent": "CAPTURE",
+        "links": [
+            {
+                "href": "https://api-m.sandbox.paypal.com/v2/checkout/orders/5O190127TN364715T",
+                "rel": "self",
+                "method": "GET",
+            },
+            {
+                "href": "https://www.sandbox.paypal.com/checkoutnow?token=5O190127TN364715T",
+                "rel": "approve",
+                "method": "GET",
+            },
+            {
+                "href": "https://api-m.sandbox.paypal.com/v2/checkout/orders/5O190127TN364715T/capture",
+                "rel": "capture",
+                "method": "POST",
+            },
+        ],
+    }
+
+    mock_capture_resp = {
+        "id": "5O190127TN364715T",
+        "status": "COMPLETED",
+        "purchase_units": [
+            {
+                "reference_id": str(order_id),
+                "payments": {
+                    "captures": [
+                        {
+                            "id": "2C679366TH822324X",
+                            "status": "COMPLETED",
+                            "amount": {"currency_code": "USD", "value": "199.99"},
+                            "final_capture": True,
+                        }
+                    ]
+                },
+            }
+        ],
+    }
+
+    import httpx
+    orig_post = httpx.AsyncClient.post
+
+    async def mock_post(self, url, **kwargs):
+        url_str = str(url)
+        class MockResponse:
+            def __init__(self, status_code, json_data):
+                self.status_code = status_code
+                self._json = json_data
+                self.text = ""
+
+            def json(self):
+                return self._json
+
+        if "paypal.com" in url_str:
+            if "/v1/oauth2/token" in url_str:
+                return MockResponse(200, mock_oauth_resp)
+            elif "/capture" in url_str:
+                return MockResponse(201, mock_capture_resp)
+            elif "/v2/checkout/orders" in url_str:
+                return MockResponse(201, mock_create_order_resp)
+            return MockResponse(404, {})
+        return await orig_post(self, url, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+
+    # 1. Create Sandbox Order
+    c_resp = await client.post(
+        "/api/payments/paypal/orders",
+        json={"order_id": order_id},
+        headers={**headers, "Idempotency-Key": "ik_sandbox_live_test"},
+    )
+    assert c_resp.status_code == 200
+    c_data = c_resp.json()["data"]
+    assert c_data["paypal_order_id"] == "5O190127TN364715T"
+    assert c_data["approval_url"] == "https://www.sandbox.paypal.com/checkoutnow?token=5O190127TN364715T"
+    assert c_data["is_demo"] is False
+    assert c_data["demo_notice"] is None
+
+    # 2. Capture Sandbox Order
+    cap_resp = await client.post(
+        f"/api/payments/paypal/orders/{order_id}/capture",
+        json={"attempt_id": c_data["attempt_id"]},
+        headers=headers,
+    )
+    assert cap_resp.status_code == 200
+    cap_data = cap_resp.json()["data"]
+    assert cap_data["status"] == "captured"
+    assert cap_data["paypal_capture_id"] == "2C679366TH822324X"
+    assert cap_data["is_demo"] is False
+    assert cap_data["captured_at"] is not None
+
+    # 3. Verify Idempotent repeated capture returns existing authoritative capture
+    cap_rep = await client.post(
+        f"/api/payments/paypal/orders/{order_id}/capture",
+        json={"attempt_id": c_data["attempt_id"]},
+        headers=headers,
+    )
+    assert cap_rep.status_code == 200
+    assert cap_rep.json()["data"]["paypal_capture_id"] == "2C679366TH822324X"

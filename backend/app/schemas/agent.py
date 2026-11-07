@@ -43,11 +43,41 @@ class ShoppingConstraint(BaseModel):
         default_factory=list,
         description="Nice-to-have user preferences (e.g., 'lightweight', 'long battery').",
     )
+    brand_preferences: list[str] = Field(
+        default_factory=list,
+        description="Preferred brands specified by the shopper.",
+    )
+    excluded_features: list[str] = Field(
+        default_factory=list,
+        description="Excluded features or characteristics.",
+    )
+    ranking_priorities: list[str] = Field(
+        default_factory=list,
+        description="Ordered priority attributes for ranking (e.g., 'battery', 'price', 'rating').",
+    )
     max_results: int = Field(
         default=5,
         ge=1,
         le=20,
         description="Maximum number of recommendations to return.",
+    )
+
+
+class LLMStructuredIntentExtract(BaseModel):
+    """Structured Pydantic validation schema for LLM response payload."""
+
+    category: str | None = Field(default=None, description="Identified product category.")
+    max_budget: float | None = Field(default=None, description="Maximum spending limit in currency units.")
+    budget_minor: int | None = Field(default=None, description="Budget in minor units (e.g. cents).")
+    currency: str = Field(default="USD", description="Currency ISO code.")
+    preferences: list[str] = Field(default_factory=list, description="Desirable preferences.")
+    required_features: list[str] = Field(default_factory=list, description="Mandatory required features.")
+    excluded_features: list[str] = Field(default_factory=list, description="Explicitly excluded features.")
+    brand_preferences: list[str] = Field(default_factory=list, description="Brand preferences.")
+    ranking_priorities: list[str] = Field(default_factory=list, description="Priority factors for sorting.")
+    is_ambiguous: bool = Field(default=False, description="Flag indicating if the intent requires clarification.")
+    clarification_questions: list[str] = Field(
+        default_factory=list, description="Questions to ask the shopper when intent is ambiguous."
     )
 
 
