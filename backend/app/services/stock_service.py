@@ -117,6 +117,64 @@ class StockService:
         return reservations
 
     @staticmethod
+    async def re_reserve_stock_for_order(
+        db: AsyncSession,
+        order_id: UUID,
+        ttl_minutes: int = 15,
+    ) -> bool:
+        """Atomically re-reserve stock for an order whose hold was expired/released.
+
+        Uses SELECT ... FOR UPDATE on Product rows in sorted order.
+        If all required products have stock_qty >= item.quantity:
+            Decrements product.stock_qty
+            Creates new StockReservation records in 'held' status
+            Returns True
+        If any product has insufficient stock:
+            Returns False
+        """
+        stmt = (
+            select(OrderItem)
+            .where(OrderItem.order_id == order_id)
+            .order_by(OrderItem.product_id)
+        )
+        items = list((await db.execute(stmt)).scalars().all())
+        if not items:
+            return False
+
+        expires_at = datetime.now(UTC) + timedelta(minutes=ttl_minutes)
+
+        # Check stock for all items under row lock first
+        sorted_items = sorted(items, key=lambda x: str(x.product_id))
+        locked_products: dict[UUID, Product] = {}
+
+        for item in sorted_items:
+            prod_stmt = (
+                select(Product)
+                .where(Product.id == item.product_id)
+                .with_for_update()
+            )
+            product = (await db.execute(prod_stmt)).scalar_one_or_none()
+            if product is None or product.stock_qty < item.quantity:
+                return False
+            locked_products[item.product_id] = product
+
+        # All products have sufficient stock: proceed to decrement and create reservations
+        for item in sorted_items:
+            product = locked_products[item.product_id]
+            product.stock_qty -= item.quantity
+            res = StockReservation(
+                product_id=product.id,
+                order_id=order_id,
+                quantity=item.quantity,
+                status="held",
+                expires_at=expires_at,
+            )
+            db.add(res)
+
+        return True
+
+
+    @staticmethod
     async def release_reservations_for_order(
         db: AsyncSession,
         order_id: UUID,

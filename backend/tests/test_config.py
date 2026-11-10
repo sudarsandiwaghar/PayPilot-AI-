@@ -61,6 +61,15 @@ def test_cors_origins_parsing():
     s4 = Settings(cors_origins=["https://direct.example.com"], _env_file=None)
     assert s4.cors_origins == ["https://direct.example.com"]
 
+    # Default development origins must include ports 5173 and 5174 for both localhost and 127.0.0.1
+    default_settings = Settings(_env_file=None)
+    assert "http://localhost:5173" in default_settings.cors_origins
+    assert "http://localhost:5174" in default_settings.cors_origins
+    assert "http://127.0.0.1:5173" in default_settings.cors_origins
+    assert "http://127.0.0.1:5174" in default_settings.cors_origins
+    assert "http://localhost:3000" in default_settings.cors_origins
+    assert "http://127.0.0.1:3000" in default_settings.cors_origins
+
 
 def test_stock_sweep_staging_configuration():
     """Verify stock sweep settings accept relaxed interval for Neon scale-to-zero safety."""

@@ -15,7 +15,8 @@ import base64
 import logging
 import secrets
 import time
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -31,6 +32,7 @@ from app.services.stock_service import StockService
 from app.utils.exceptions import (
     ActivePaymentExists,
     IdempotencyKeyReused,
+    InsufficientStock,
     OrderNotConfirmed,
     OrderNotFound,
     PaymentAttemptNotFound,
@@ -38,6 +40,12 @@ from app.utils.exceptions import (
     PayPalWebhookInvalid,
     PayPalWebhookNotConfigured,
     StockReservationExpired,
+)
+from app.utils.security import (
+    generate_session_token,
+    hash_token,
+    sign_recovery_token,
+    verify_recovery_token,
 )
 
 logger = logging.getLogger("paypilot.payment_service")
@@ -178,8 +186,24 @@ class PaymentService:
             if existing_att.status not in TERMINAL_STATES:
                 raise ActivePaymentExists(str(order_id))
 
-        # 5. Determine next attempt number
+        # 5. Determine next attempt number and pre-generate attempt_id
         attempt_number = len(order.payment_attempts) + 1
+        attempt_id = uuid.uuid4()
+
+        # Generate tamper-proof recovery token for return redirect
+        secret_key = getattr(settings, "app_secret_key", None) or "fallback_secret_min_16_bytes"
+        recovery_ttl = getattr(settings, "paypal_recovery_token_ttl_minutes", 45)
+        recovery_token, _ = sign_recovery_token(
+            secret_key=secret_key,
+            order_id=str(order.id),
+            attempt_id=str(attempt_id),
+            session_id=str(order.session_id),
+            ttl_minutes=recovery_ttl,
+        )
+
+        base_frontend = (return_url_base or "http://localhost:5174").rstrip("/")
+        return_url = f"{base_frontend}/#/checkout/complete?recovery_token={recovery_token}"
+        cancel_url = f"{base_frontend}/#/checkout/cancel"
 
         # 6. Call PayPal Create Order (or mock/demo if configured)
         is_demo = PaymentService.is_demo_mode(settings)
@@ -193,7 +217,6 @@ class PaymentService:
                     "PayPal OAuth authentication failed: Unable to obtain access token in sandbox/live mode."
                 )
             amount_val = f"{order.total_minor / 100:.2f}"
-            base_frontend = (return_url_base or "http://localhost:5174").rstrip("/")
             payload = {
                 "intent": "CAPTURE",
                 "purchase_units": [
@@ -209,8 +232,8 @@ class PaymentService:
                     "brand_name": "PayPilot AI",
                     "landing_page": "NO_PREFERENCE",
                     "user_action": "PAY_NOW",
-                    "return_url": f"{base_frontend}/#/checkout/complete",
-                    "cancel_url": f"{base_frontend}/#/checkout/cancel",
+                    "return_url": return_url,
+                    "cancel_url": cancel_url,
                 },
             }
             headers = {
@@ -235,10 +258,11 @@ class PaymentService:
         else:
             # Deterministic synthetic demo order ID
             paypal_order_id = f"DEMO-PAYPAL-ORD-{secrets.token_hex(8).upper()}"
-            approval_url = f"https://demo.paypilot.local/checkoutnow?token={paypal_order_id}&demo=true"
+            approval_url = f"{base_frontend}/#/checkout/complete?recovery_token={recovery_token}&token={paypal_order_id}&demo=true"
 
         # 7. Create PaymentAttempt record
         attempt = PaymentAttempt(
+            id=attempt_id,
             order_id=order.id,
             attempt_number=attempt_number,
             idempotency_key=idempotency_key,
@@ -321,6 +345,130 @@ class PaymentService:
         return attempt
 
     @staticmethod
+    async def resolve_paypal_return(
+        db: AsyncSession,
+        recovery_token: str,
+        paypal_order_id: str,
+        payer_id: str | None = None,
+        existing_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve an offsite PayPal return redirect and re-hydrate session context.
+
+        Validates the tamper-proof HMAC recovery token against server secret,
+        verifies PayPal authoritative status, re-reserves expired stock if needed,
+        and generates an authorized session token for the returning browser.
+        """
+        settings = get_settings()
+        secret_key = getattr(settings, "app_secret_key", None) or "fallback_secret_min_16_bytes"
+        payload = verify_recovery_token(secret_key, recovery_token)
+        if not payload:
+            raise PaymentCaptureFailed("Invalid or expired checkout recovery token.")
+
+        if "paypal_order_id" in payload and payload["paypal_order_id"] != paypal_order_id:
+            raise PaymentCaptureFailed(
+                f"PayPal order ID mismatch: token belongs to {payload['paypal_order_id']}, got {paypal_order_id}"
+            )
+
+        order_id = UUID(payload["order_id"])
+        attempt_id = UUID(payload["attempt_id"])
+        session_id = UUID(payload["session_id"])
+
+        stmt = (
+            select(PaymentAttempt)
+            .options(
+                selectinload(PaymentAttempt.order).selectinload(Order.session),
+                selectinload(PaymentAttempt.order).selectinload(Order.items),
+                selectinload(PaymentAttempt.order).selectinload(Order.stock_reservations),
+            )
+            .where(
+                PaymentAttempt.id == attempt_id,
+                PaymentAttempt.order_id == order_id,
+            )
+        )
+        attempt = (await db.execute(stmt)).scalar_one_or_none()
+        if not attempt:
+            raise PaymentAttemptNotFound(str(attempt_id))
+
+        if attempt.paypal_order_id and attempt.paypal_order_id != paypal_order_id:
+            raise PaymentCaptureFailed(
+                f"PayPal order ID mismatch: attempt has {attempt.paypal_order_id}, got {paypal_order_id}"
+            )
+
+        order = attempt.order
+        session = order.session
+        is_demo = PaymentService.is_demo_mode(settings)
+
+        # In sandbox/live, verify PayPal status is APPROVED or COMPLETED
+        if not is_demo:
+            access_token = await PaymentService._get_paypal_access_token(settings)
+            if not access_token:
+                raise PaymentCaptureFailed("Unable to verify PayPal order: authorization failed.")
+            headers = {"Authorization": f"Bearer {access_token}"}
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.get(
+                    f"{settings.paypal_base_url}/v2/checkout/orders/{paypal_order_id}",
+                    headers=headers,
+                )
+                if res.status_code != 200:
+                    raise PaymentCaptureFailed(f"Authoritative PayPal order lookup failed (HTTP {res.status_code})")
+                paypal_data = res.json()
+                status = paypal_data.get("status")
+                if status not in ("APPROVED", "COMPLETED"):
+                    raise PaymentCaptureFailed(f"PayPal order not approved: status is {status}")
+                if payer_id and not attempt.paypal_payer_id:
+                    attempt.paypal_payer_id = payer_id
+
+        # If order was cancelled / hold expired, attempt re-reservation
+        stock_re_reserved = False
+        now = datetime.now(UTC)
+        is_expired = (order.stock_reserved_until and now > order.stock_reserved_until) or order.status == "cancelled"
+
+        if is_expired and attempt.status != "captured":
+            re_reserved = await StockService.re_reserve_stock_for_order(
+                db=db,
+                order_id=order.id,
+                ttl_minutes=settings.stock_reservation_ttl_minutes,
+            )
+            if not re_reserved:
+                raise InsufficientStock(
+                    product_id="order_items",
+                    available=0,
+                    requested=1,
+                )
+            order.status = "payment_processing"
+            order.stock_reserved_until = now + timedelta(minutes=settings.stock_reservation_ttl_minutes)
+            stock_re_reserved = True
+            from app.services.audit_service import AuditService
+            await AuditService.emit_event(
+                db=db,
+                event_type="payment.stock_re_reserved",
+                actor="system",
+                session_id=session.id,
+                order_id=order.id,
+                payload={"order_id": str(order.id), "paypal_order_id": paypal_order_id},
+            )
+
+        # Issue fresh raw access token for cold/Incognito tabs, or preserve existing valid token if present
+        if existing_token and hash_token(existing_token) == session.access_token_hash and session.status == "active":
+            token_for_response = existing_token
+        else:
+            token_for_response = generate_session_token()
+            session.access_token_hash = hash_token(token_for_response)
+            session.status = "active"
+
+        await db.commit()
+        await db.refresh(order)
+        await db.refresh(attempt)
+
+        return {
+            "session_id": session.id,
+            "access_token": token_for_response,
+            "order": order,
+            "attempt": attempt,
+            "stock_re_reserved": stock_re_reserved,
+        }
+
+    @staticmethod
     async def capture_payment_attempt(
         db: AsyncSession,
         order_id: UUID,
@@ -351,14 +499,66 @@ class PaymentService:
 
         order = attempt.order
 
-        # Stock hold check
-        if order.stock_reserved_until and datetime.now(UTC) > order.stock_reserved_until:
-            await StockService.expire_order_reservations_if_overdue(db, order_id)
-            order.status = "cancelled"
-            attempt.status = "expired"
-            attempt.failure_reason = "Stock reservation expired before capture"
-            await db.commit()
-            raise StockReservationExpired(str(order_id))
+        # Stock hold check and safe re-reservation for approved orders
+        now = datetime.now(UTC)
+        is_hold_expired = (order.stock_reserved_until and now > order.stock_reserved_until) or order.status == "cancelled"
+
+        if is_hold_expired:
+            settings = get_settings()
+            is_demo = PaymentService.is_demo_mode(settings)
+            is_approved = False
+
+            if is_demo:
+                is_approved = attempt.status == "approved"
+            else:
+                access_token = await PaymentService._get_paypal_access_token(settings)
+                if access_token and attempt.paypal_order_id:
+                    headers = {"Authorization": f"Bearer {access_token}"}
+                    try:
+                        async with httpx.AsyncClient(timeout=10.0) as client:
+                            res = await client.get(
+                                f"{settings.paypal_base_url}/v2/checkout/orders/{attempt.paypal_order_id}",
+                                headers=headers,
+                            )
+                            if res.status_code == 200:
+                                paypal_data = res.json()
+                                is_approved = paypal_data.get("status") in ("APPROVED", "COMPLETED")
+                    except Exception:
+                        is_approved = False
+
+            if is_approved:
+                # Attempt atomic re-reservation under row lock
+                re_reserved = await StockService.re_reserve_stock_for_order(
+                    db=db,
+                    order_id=order.id,
+                    ttl_minutes=settings.stock_reservation_ttl_minutes,
+                )
+                if re_reserved:
+                    order.status = "payment_processing"
+                    order.stock_reserved_until = now + timedelta(minutes=settings.stock_reservation_ttl_minutes)
+                    from app.services.audit_service import AuditService
+                    await AuditService.emit_event(
+                        db=db,
+                        event_type="payment.stock_re_reserved_at_capture",
+                        actor="system",
+                        session_id=order.session_id,
+                        order_id=order.id,
+                        payload={"order_id": str(order.id), "attempt_id": str(attempt.id)},
+                    )
+                else:
+                    # Stock exhausted while hold was expired: CANNOT CAPTURE!
+                    order.status = "cancelled"
+                    attempt.status = "expired"
+                    attempt.failure_reason = "Stock reservation expired and inventory is no longer available"
+                    await db.commit()
+                    raise InsufficientStock(product_id="order_items", available=0, requested=1)
+            else:
+                await StockService.expire_order_reservations_if_overdue(db, order_id)
+                order.status = "cancelled"
+                attempt.status = "expired"
+                attempt.failure_reason = "Stock reservation expired before capture"
+                await db.commit()
+                raise StockReservationExpired(str(order_id))
 
         settings = get_settings()
         is_demo = PaymentService.is_demo_mode(settings)

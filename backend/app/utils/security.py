@@ -170,3 +170,109 @@ def verify_preview_token(
         return None
 
     return payload
+
+
+# ── HMAC Checkout Recovery Tokens ─────────────────────────────────
+
+
+def _build_recovery_payload(
+    order_id: str,
+    attempt_id: str,
+    session_id: str,
+    expires_at: datetime,
+    paypal_order_id: str | None = None,
+) -> str:
+    """Build a canonical JSON string for checkout return recovery."""
+    payload: dict[str, str | None] = {
+        "order_id": order_id,
+        "attempt_id": attempt_id,
+        "session_id": session_id,
+        "purpose": "paypal_return_recovery",
+        "expires_at": expires_at.isoformat(),
+    }
+    if paypal_order_id is not None:
+        payload["paypal_order_id"] = paypal_order_id
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def sign_recovery_token(
+    secret_key: str,
+    order_id: str,
+    attempt_id: str,
+    session_id: str,
+    paypal_order_id: str | None = None,
+    ttl_minutes: int = 45,
+) -> tuple[str, datetime]:
+    """Create a tamper-proof HMAC signed recovery token for PayPal return redirects."""
+    import base64
+
+    expires_at = datetime.now(UTC) + timedelta(minutes=ttl_minutes)
+    payload_str = _build_recovery_payload(
+        order_id, attempt_id, session_id, expires_at, paypal_order_id
+    )
+    signature = hmac.new(
+        secret_key.encode("utf-8"),
+        payload_str.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    encoded_payload = base64.urlsafe_b64encode(payload_str.encode("utf-8")).decode("ascii")
+    token = f"{encoded_payload}.{signature}"
+    return token, expires_at
+
+
+def decode_recovery_token_signature(
+    secret_key: str,
+    token: str,
+) -> dict | None:
+    """Verify an HMAC recovery token's signature without checking expiry."""
+    import base64
+
+    parts = token.rsplit(".", 1)
+    if len(parts) != 2:
+        return None
+
+    encoded_payload, presented_signature = parts
+
+    try:
+        payload_bytes = base64.urlsafe_b64decode(encoded_payload.encode("ascii"))
+        payload_str = payload_bytes.decode("utf-8")
+    except Exception:
+        return None
+
+    expected_signature = hmac.new(
+        secret_key.encode("utf-8"),
+        payload_str.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    if not hmac.compare_digest(presented_signature, expected_signature):
+        return None
+
+    try:
+        return json.loads(payload_str)
+    except json.JSONDecodeError:
+        return None
+
+
+def verify_recovery_token(
+    secret_key: str,
+    token: str,
+) -> dict | None:
+    """Verify an HMAC recovery token and return the payload if valid and not expired."""
+    payload = decode_recovery_token_signature(secret_key, token)
+    if payload is None:
+        return None
+
+    if payload.get("purpose") != "paypal_return_recovery":
+        return None
+
+    try:
+        expires_at = datetime.fromisoformat(payload["expires_at"])
+        if datetime.now(UTC) > expires_at:
+            return None
+    except Exception:
+        return None
+
+    return payload
+

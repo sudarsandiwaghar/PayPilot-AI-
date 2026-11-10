@@ -195,5 +195,6 @@ def create_app() -> FastAPI:
     return app
 
 
-# Module-level app instance for uvicorn
+# Module-level app instance for uvicorn (clear settings cache to reload env vars)
+get_settings.cache_clear()
 app = create_app()

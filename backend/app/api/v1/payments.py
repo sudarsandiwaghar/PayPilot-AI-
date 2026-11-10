@@ -3,6 +3,7 @@ Payment API endpoints (v1).
 
 - POST /orders/{order_id}/payments: Create a PayPal payment attempt (idempotent).
 - POST /orders/{order_id}/payments/{attempt_id}/capture: Capture payment.
+- POST /payments/paypal/resolve-return: Resolve return redirect and recover session.
 - GET /orders/{order_id}/payments: List all payment attempts for this order.
 - GET /orders/{order_id}/payments/{attempt_id}: Get specific attempt status.
 - POST /webhooks/paypal: Async PayPal webhook notification receiver.
@@ -28,6 +29,8 @@ from app.schemas.payment import (
     PayPalOrderCaptureRequest,
     PayPalOrderCreateRequest,
     PayPalPublicConfig,
+    PayPalResolveReturnRequest,
+    PayPalResolveReturnResponse,
     PaymentApproveResponse,
     PaymentAttemptOut,
     PaymentCaptureRequest,
@@ -276,6 +279,61 @@ async def capture_paypal_order(
         paypal_capture_id=attempt.paypal_capture_id,
         is_demo=is_demo,
         demo_notice="Demo payment — no real payment processed" if is_demo else None,
+    )
+    return ApiResponse(data=data, meta=_build_meta(request))
+
+
+@router.post(
+    "/payments/paypal/resolve-return",
+    response_model=ApiResponse[PayPalResolveReturnResponse],
+    summary="Resolve PayPal return redirect and recover session",
+    description="Validates cryptographic HMAC recovery token, checks PayPal status, re-reserves expired stock if needed, and issues an authorized session token.",
+)
+async def resolve_paypal_return(
+    request: Request,
+    body: PayPalResolveReturnRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PayPalResolveReturnResponse]:
+    auth_header = request.headers.get("authorization", "")
+    existing_token = (
+        auth_header.removeprefix("Bearer ").strip()
+        if auth_header.startswith("Bearer ")
+        else None
+    )
+    result = await PaymentService.resolve_paypal_return(
+        db=db,
+        recovery_token=body.recovery_token,
+        paypal_order_id=body.paypal_order_id,
+        payer_id=body.payer_id,
+        existing_token=existing_token,
+    )
+    from app.services.checkout_service import CheckoutService
+
+    is_demo = PaymentService.is_demo_mode()
+    att = result["attempt"]
+    attempt_out = PaymentAttemptOut(
+        attempt_id=att.id,
+        attempt_number=att.attempt_number,
+        idempotency_key=att.idempotency_key,
+        paypal_order_id=att.paypal_order_id,
+        paypal_capture_id=att.paypal_capture_id,
+        approval_url=att.approval_url,
+        status=att.status,
+        amount_minor=att.amount_minor,
+        currency=att.currency,
+        failure_reason=att.failure_reason,
+        captured_at=att.captured_at,
+        created_at=att.created_at,
+        is_demo=is_demo,
+        demo_notice="Demo payment — no real payment processed" if is_demo else None,
+    )
+    order_out = CheckoutService.serialize_order_out(result["order"])
+    data = PayPalResolveReturnResponse(
+        session_id=result["session_id"],
+        access_token=result["access_token"],
+        order=order_out,
+        attempt=attempt_out,
+        stock_re_reserved=result.get("stock_re_reserved", False),
     )
     return ApiResponse(data=data, meta=_build_meta(request))
 

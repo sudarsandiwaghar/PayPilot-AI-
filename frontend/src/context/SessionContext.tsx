@@ -20,6 +20,8 @@ import {
   SessionContext,
   STORAGE_SESSION_ID,
   STORAGE_ACCESS_TOKEN,
+  STORAGE_ACTIVE_ORDER_ID,
+  STORAGE_PAYPAL_ORDER_ID,
 } from './sessionContextDef'
 
 export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -54,25 +56,23 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const clearError = () => setErrorState(null)
   const setError = (msg: string | null) => setErrorState(msg)
 
-  // ── Session Init & Reset (Using sessionStorage) ─────────────────
+  // ── Session Init & Reset (Using sessionStorage with tab-recovery support) ───
   const initSession = useCallback(async () => {
     await Promise.resolve()
 
-    // Clean up any legacy localStorage tokens if present
-    try {
-      localStorage.removeItem(STORAGE_SESSION_ID)
-      localStorage.removeItem(STORAGE_ACCESS_TOKEN)
-    } catch {
-      // Ignore if localStorage unavailable
-    }
-
-    const storedId = sessionStorage.getItem(STORAGE_SESSION_ID)
-    const storedToken = sessionStorage.getItem(STORAGE_ACCESS_TOKEN)
+    const storedId = sessionStorage.getItem(STORAGE_SESSION_ID) || localStorage.getItem(STORAGE_SESSION_ID)
+    const storedToken = sessionStorage.getItem(STORAGE_ACCESS_TOKEN) || localStorage.getItem(STORAGE_ACCESS_TOKEN)
 
     if (storedId && storedToken) {
       try {
         const existing = await api.getSession(storedId, storedToken)
         if (existing.status === 'active') {
+          sessionStorage.setItem(STORAGE_SESSION_ID, storedId)
+          sessionStorage.setItem(STORAGE_ACCESS_TOKEN, storedToken)
+          try {
+            localStorage.setItem(STORAGE_SESSION_ID, storedId)
+            localStorage.setItem(STORAGE_ACCESS_TOKEN, storedToken)
+          } catch {}
           setSession(existing)
           setToken(storedToken)
           // Load cart for this session
@@ -85,6 +85,10 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         // Stored session invalid, fallback to creating fresh
         sessionStorage.removeItem(STORAGE_SESSION_ID)
         sessionStorage.removeItem(STORAGE_ACCESS_TOKEN)
+        try {
+          localStorage.removeItem(STORAGE_SESSION_ID)
+          localStorage.removeItem(STORAGE_ACCESS_TOKEN)
+        } catch {}
       }
     }
 
@@ -94,6 +98,10 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (created.access_token) {
         sessionStorage.setItem(STORAGE_SESSION_ID, created.session_id)
         sessionStorage.setItem(STORAGE_ACCESS_TOKEN, created.access_token)
+        try {
+          localStorage.setItem(STORAGE_SESSION_ID, created.session_id)
+          localStorage.setItem(STORAGE_ACCESS_TOKEN, created.access_token)
+        } catch {}
         setSession({
           session_id: created.session_id,
           status: created.status,
@@ -111,9 +119,144 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [])
 
+  const clearCheckoutRecoveryData = useCallback(() => {
+    sessionStorage.removeItem(STORAGE_ACTIVE_ORDER_ID)
+    sessionStorage.removeItem(STORAGE_PAYPAL_ORDER_ID)
+    try {
+      localStorage.removeItem(STORAGE_ACTIVE_ORDER_ID)
+      localStorage.removeItem(STORAGE_PAYPAL_ORDER_ID)
+    } catch {}
+  }, [])
+
+  const handleSetActiveOrder = useCallback((order: OrderData | null) => {
+    setActiveOrder(order)
+    if (order?.id) {
+      sessionStorage.setItem(STORAGE_ACTIVE_ORDER_ID, order.id)
+      try {
+        localStorage.setItem(STORAGE_ACTIVE_ORDER_ID, order.id)
+      } catch {}
+    } else {
+      sessionStorage.removeItem(STORAGE_ACTIVE_ORDER_ID)
+      try {
+        localStorage.removeItem(STORAGE_ACTIVE_ORDER_ID)
+      } catch {}
+    }
+  }, [])
+
+  const handleSetPaymentAttempt = useCallback((attempt: PaymentAttemptData | null) => {
+    setPaymentAttempt(attempt)
+    if (attempt?.paypal_order_id) {
+      sessionStorage.setItem(STORAGE_PAYPAL_ORDER_ID, attempt.paypal_order_id)
+      try {
+        localStorage.setItem(STORAGE_PAYPAL_ORDER_ID, attempt.paypal_order_id)
+      } catch {}
+    } else if (!attempt) {
+      sessionStorage.removeItem(STORAGE_PAYPAL_ORDER_ID)
+      try {
+        localStorage.removeItem(STORAGE_PAYPAL_ORDER_ID)
+      } catch {}
+    }
+  }, [])
+
+  const restoreCheckoutOrder = useCallback(
+    async (
+      paypalToken?: string,
+      recoveryToken?: string,
+      payerId?: string
+    ): Promise<{ order: OrderData; attempt: PaymentAttemptData } | null> => {
+      let storedOrderId =
+        sessionStorage.getItem(STORAGE_ACTIVE_ORDER_ID) ||
+        localStorage.getItem(STORAGE_ACTIVE_ORDER_ID)
+      let currentToken =
+        token ||
+        sessionStorage.getItem(STORAGE_ACCESS_TOKEN) ||
+        localStorage.getItem(STORAGE_ACCESS_TOKEN)
+
+      // Fallback 1: If browser storage is empty (e.g. Incognito or fresh window), but recoveryToken & paypalToken are present:
+      if ((!storedOrderId || !currentToken) && recoveryToken && paypalToken) {
+        try {
+          const resolved = await api.resolvePayPalReturn({
+            recovery_token: recoveryToken,
+            paypal_order_id: paypalToken,
+            payer_id: payerId || undefined,
+          })
+
+          if (resolved?.access_token && resolved?.order) {
+            sessionStorage.setItem(STORAGE_SESSION_ID, resolved.session_id)
+            sessionStorage.setItem(STORAGE_ACCESS_TOKEN, resolved.access_token)
+            try {
+              localStorage.setItem(STORAGE_SESSION_ID, resolved.session_id)
+              localStorage.setItem(STORAGE_ACCESS_TOKEN, resolved.access_token)
+            } catch {}
+
+            setSession({
+              session_id: resolved.session_id,
+              status: 'active',
+              access_token: resolved.access_token,
+              created_at: new Date().toISOString(),
+            })
+            setToken(resolved.access_token)
+            handleSetActiveOrder(resolved.order)
+            handleSetPaymentAttempt(resolved.attempt)
+            setIsPaymentOpen(true)
+            return { order: resolved.order, attempt: resolved.attempt }
+          }
+        } catch (resolveErr) {
+          console.error('Failed to resolve PayPal return with recovery token:', resolveErr)
+          throw resolveErr
+        }
+      }
+
+      if (!storedOrderId || !currentToken) {
+        return null
+      }
+
+      try {
+        const order = await api.getOrder(storedOrderId, currentToken)
+        const attempts = await api.listPaymentAttempts(storedOrderId, currentToken)
+        let matchedAttempt: PaymentAttemptData | null = null
+
+        if (paypalToken) {
+          matchedAttempt = attempts.find((a) => a.paypal_order_id === paypalToken) || null
+          if (!matchedAttempt && attempts.length > 0) {
+            const latest = attempts[attempts.length - 1]
+            if (latest.paypal_order_id === paypalToken) {
+              matchedAttempt = latest
+            }
+          }
+        } else {
+          matchedAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null
+        }
+
+        if (!matchedAttempt) {
+          if (paypalToken) {
+            throw new Error(
+              `Security validation failed: returned PayPal token ${paypalToken} does not match any payment attempt for order ${storedOrderId}.`
+            )
+          }
+          return null
+        }
+
+        handleSetActiveOrder(order)
+        handleSetPaymentAttempt(matchedAttempt)
+        setIsPaymentOpen(true)
+        return { order, attempt: matchedAttempt }
+      } catch (err) {
+        console.error('Failed to restore checkout order:', err)
+        throw err
+      }
+    },
+    [token, handleSetActiveOrder, handleSetPaymentAttempt]
+  )
+
   const resetSession = useCallback(async () => {
     sessionStorage.removeItem(STORAGE_SESSION_ID)
     sessionStorage.removeItem(STORAGE_ACCESS_TOKEN)
+    try {
+      localStorage.removeItem(STORAGE_SESSION_ID)
+      localStorage.removeItem(STORAGE_ACCESS_TOKEN)
+    } catch {}
+    clearCheckoutRecoveryData()
     setSession(null)
     setToken(null)
     setCart(null)
@@ -122,7 +265,7 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setActiveOrder(null)
     setPaymentAttempt(null)
     await initSession()
-  }, [initSession, clearCartFeedback])
+  }, [initSession, clearCartFeedback, clearCheckoutRecoveryData])
 
   // ── Cart Refresh ───────────────────────────────────────────────
   const refreshCart = useCallback(async () => {
@@ -266,9 +409,11 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         checkoutPreview,
         setCheckoutPreview,
         activeOrder,
-        setActiveOrder,
+        setActiveOrder: handleSetActiveOrder,
         paymentAttempt,
-        setPaymentAttempt,
+        setPaymentAttempt: handleSetPaymentAttempt,
+        restoreCheckoutOrder,
+        clearCheckoutRecoveryData,
         isCheckoutOpen,
         setIsCheckoutOpen,
         isPaymentOpen,

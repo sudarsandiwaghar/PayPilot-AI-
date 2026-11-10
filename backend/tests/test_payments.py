@@ -790,3 +790,92 @@ async def test_paypal_sandbox_live_rest_v2_flow(
     )
     assert cap_rep.status_code == 200
     assert cap_rep.json()["data"]["paypal_capture_id"] == "2C679366TH822324X"
+
+
+@pytest.mark.asyncio
+async def test_payment_creation_dynamic_return_url_ports(
+    client: AsyncClient,
+    placed_order: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify payment creation respects dynamic origin ports 5174 and 5173 for PayPal redirect."""
+    order_id = placed_order["order"]["id"]
+    headers = placed_order["headers"]
+
+    captured_payloads = []
+
+    import httpx
+    orig_post = httpx.AsyncClient.post
+
+    async def mock_post(self, url, **kwargs):
+        url_str = str(url)
+        class MockResp:
+            status_code = 201
+            text = ""
+            def json(self):
+                return {
+                    "id": "PAYPAL-ORD-PORT-TEST",
+                    "links": [{"href": "https://sandbox.paypal.com/checkoutnow?token=PAYPAL-ORD-PORT-TEST", "rel": "approve"}],
+                }
+        if "paypal.com" in url_str:
+            if "oauth2/token" in url_str:
+                class OAuthResp:
+                    status_code = 200
+                    def json(self): return {"access_token": "TOK123", "expires_in": 3600}
+                return OAuthResp()
+            if "checkout/orders" in url_str:
+                captured_payloads.append(kwargs.get("json", {}))
+                return MockResp()
+            return MockResp()
+        return await orig_post(self, url, **kwargs)
+
+    from app.config import Settings
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    sandbox_settings = Settings(
+        paypal_mode="sandbox",
+        paypal_client_id="DUMMY_CLIENT",
+        paypal_client_secret="DUMMY_SECRET",
+        _env_file=None,
+    )
+    monkeypatch.setattr("app.services.payment_service.get_settings", lambda: sandbox_settings)
+    clear_paypal_token_cache()
+
+    # Request with Origin: http://localhost:5174
+    resp_5174 = await client.post(
+        f"/api/v1/orders/{order_id}/payments",
+        headers={**headers, "Origin": "http://localhost:5174"},
+    )
+    assert resp_5174.status_code == 200
+    assert len(captured_payloads) == 1
+    app_ctx = captured_payloads[0].get("application_context", {})
+    assert app_ctx.get("return_url", "").startswith("http://localhost:5174/#/checkout/complete")
+    assert "recovery_token=" in app_ctx.get("return_url", "")
+    assert app_ctx.get("cancel_url") == "http://localhost:5174/#/checkout/cancel"
+
+
+@pytest.mark.asyncio
+async def test_list_payment_attempts_restoration_and_session_isolation(
+    client: AsyncClient,
+    placed_order: dict,
+) -> None:
+    """Verify list_payment_attempts returns attempts for session owner and blocks unauthorized sessions."""
+    order_id = placed_order["order"]["id"]
+    headers = placed_order["headers"]
+
+    att_resp = await client.post(f"/api/v1/orders/{order_id}/payments", headers=headers)
+    assert att_resp.status_code == 200
+    attempt_id = att_resp.json()["data"]["attempt_id"]
+
+    # 1. Session owner can list payment attempts
+    list_resp = await client.get(f"/api/v1/orders/{order_id}/payments", headers=headers)
+    assert list_resp.status_code == 200
+    attempts = list_resp.json()["data"]
+    assert len(attempts) == 1
+    assert attempts[0]["attempt_id"] == attempt_id
+
+    # 2. Unauthorized session cannot list payment attempts
+    other_session = (await client.post("/api/v1/sessions")).json()["data"]
+    other_headers = {"Authorization": f"Bearer {other_session['access_token']}"}
+
+    unauth_resp = await client.get(f"/api/v1/orders/{order_id}/payments", headers=other_headers)
+    assert unauth_resp.status_code in (401, 403)

@@ -13,14 +13,34 @@ import { OrderDetailsModal } from './components/OrderDetailsModal'
 import { ComparisonModal } from './components/ComparisonModal'
 import { StickyCartBar } from './components/StickyCartBar'
 import { useSession } from './context/useSession'
-import { AlertCircle, X, Shield, Lock, Server } from 'lucide-react'
+import { AlertCircle, X, Shield, Lock, Server, CreditCard } from 'lucide-react'
+import { api } from './api/client'
 
 export function App() {
   const [currentView, setCurrentView] = useState<NavigationItem>('dashboard')
   const [aiSearchQuery, setAiSearchQuery] = useState('')
   const [catalogQuery, setCatalogQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
-  const { error, clearError, session, cart } = useSession()
+  const [paypalMode, setPaypalMode] = useState<string | null>(null)
+  const { error, clearError, session, cart, setIsPaymentOpen, clearCheckoutRecoveryData } = useSession()
+
+  // Fetch PayPal public configuration for dynamic footer payment mode display
+  useEffect(() => {
+    let isMounted = true
+    api
+      .getPayPalConfig()
+      .then((cfg) => {
+        if (isMounted && cfg?.mode) {
+          setPaypalMode(cfg.mode.toUpperCase())
+        }
+      })
+      .catch(() => {
+        // Fallback to active status
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   // Hash-based routing synchronization to support refresh & direct navigation
   useEffect(() => {
@@ -42,8 +62,12 @@ export function App() {
         setCurrentView('compare')
       } else if (hash.startsWith('#/orders')) {
         setCurrentView('orders')
-      } else if (hash.startsWith('#/checkout/complete') || hash.startsWith('#/checkout/cancel')) {
+      } else if (hash.startsWith('#/checkout/complete')) {
         setCurrentView('orders')
+        setIsPaymentOpen(true)
+      } else if (hash.startsWith('#/checkout/cancel')) {
+        setCurrentView('orders')
+        clearCheckoutRecoveryData()
       } else if (hash.startsWith('#/dashboard')) {
         setCurrentView('dashboard')
       } else {
@@ -54,7 +78,7 @@ export function App() {
     syncFromHash()
     window.addEventListener('hashchange', syncFromHash)
     return () => window.removeEventListener('hashchange', syncFromHash)
-  }, [])
+  }, [setIsPaymentOpen, clearCheckoutRecoveryData])
 
   const handleSelectView = (view: NavigationItem) => {
     setCurrentView(view)
@@ -211,7 +235,10 @@ export function App() {
                 <Lock size={13} color="var(--color-secondary)" />
                 Zero Client Secrets
               </span>
-              <span>Synthetic Demo Payment Flow (PAYPAL_MODE=mock)</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <CreditCard size={13} color="var(--color-secondary)" />
+                Secure Checkout Gateway &bull; PayPal Integration {paypalMode ? `(${paypalMode})` : 'Active'}
+              </span>
             </div>
           </div>
         </footer>

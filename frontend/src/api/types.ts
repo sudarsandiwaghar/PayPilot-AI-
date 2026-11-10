@@ -208,6 +208,20 @@ export interface PayPalPublicConfig {
   is_demo: boolean
 }
 
+export interface PayPalResolveReturnRequest {
+  recovery_token: string
+  paypal_order_id: string
+  payer_id?: string | null
+}
+
+export interface PayPalResolveReturnResponse {
+  session_id: string
+  access_token: string
+  order: OrderData
+  attempt: PaymentAttemptData
+  stock_re_reserved: boolean
+}
+
 export interface OrderData {
   id: string
   order_number: string

@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+from httpx import AsyncClient
 from pydantic import ValidationError
 
 from app.config import Settings
@@ -352,4 +353,69 @@ def test_secret_filter_scrubs_sensitive_values() -> None:
     assert "gemini-key-xyz" not in record.msg
     assert "mypassword" not in record.msg
     assert "***REDACTED***" in record.msg
+
+
+@pytest.mark.asyncio
+async def test_cors_accepted_and_rejected_origins(client: AsyncClient) -> None:
+    """Verify that safe local dev origins (including 5174) are accepted and unauthorized origins rejected."""
+    # 1. Accepted origin: http://localhost:5174
+    resp_5174 = await client.options(
+        "/api/v1/health",
+        headers={
+            "Origin": "http://localhost:5174",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert resp_5174.headers.get("access-control-allow-origin") == "http://localhost:5174"
+    assert resp_5174.headers.get("access-control-allow-credentials") == "true"
+
+    # 2. Accepted origin: http://127.0.0.1:5174
+    resp_ip_5174 = await client.options(
+        "/api/v1/health",
+        headers={
+            "Origin": "http://127.0.0.1:5174",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert resp_ip_5174.headers.get("access-control-allow-origin") == "http://127.0.0.1:5174"
+
+    # 3. Accepted origin: http://localhost:5173
+    resp_5173 = await client.options(
+        "/api/v1/health",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert resp_5173.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+    # 4. Accepted origin: http://localhost:5175
+    resp_5175 = await client.options(
+        "/api/v1/health",
+        headers={
+            "Origin": "http://localhost:5175",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert resp_5175.headers.get("access-control-allow-origin") == "http://localhost:5175"
+
+    # 4. Rejected untrusted origin: http://evil-site.com
+    resp_evil = await client.options(
+        "/api/v1/health",
+        headers={
+            "Origin": "http://evil-site.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert resp_evil.headers.get("access-control-allow-origin") is None
+
+    # 5. Rejected unconfigured local port: http://localhost:9999
+    resp_unconfigured = await client.options(
+        "/api/v1/health",
+        headers={
+            "Origin": "http://localhost:9999",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert resp_unconfigured.headers.get("access-control-allow-origin") is None
 

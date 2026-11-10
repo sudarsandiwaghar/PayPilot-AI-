@@ -43,6 +43,8 @@ export interface SessionContextType {
   setActiveOrder: (order: OrderData | null) => void
   paymentAttempt: PaymentAttemptData | null
   setPaymentAttempt: (attempt: PaymentAttemptData | null) => void
+  restoreCheckoutOrder: (paypalToken?: string, recoveryToken?: string, payerId?: string) => Promise<{ order: OrderData; attempt: PaymentAttemptData } | null>
+  clearCheckoutRecoveryData: () => void
 
   // Modals
   isCheckoutOpen: boolean
@@ -57,5 +59,7 @@ export interface SessionContextType {
 
 export const STORAGE_SESSION_ID = 'paypilot_session_id'
 export const STORAGE_ACCESS_TOKEN = 'paypilot_access_token'
+export const STORAGE_ACTIVE_ORDER_ID = 'paypilot_active_order_id'
+export const STORAGE_PAYPAL_ORDER_ID = 'paypilot_paypal_order_id'
 
 export const SessionContext = createContext<SessionContextType | undefined>(undefined)

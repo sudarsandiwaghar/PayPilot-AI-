@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   X,
   CreditCard,
@@ -28,6 +28,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
     isPaymentOpen,
     setIsPaymentOpen,
     setIsOrderDetailsOpen,
+    restoreCheckoutOrder,
+    clearCheckoutRecoveryData,
   } = useSession()
 
   const [isLoadingAttempt, setIsLoadingAttempt] = useState(false)
@@ -37,6 +39,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
   const [error, setError] = useState<string | null>(null)
   const [paypalConfig, setPaypalConfig] = useState<PayPalPublicConfig | null>(null)
   const [sdkReady, setSdkReady] = useState(false)
+  const hasCapturedRef = useRef(false)
+  const isRecoveringRef = useRef(false)
 
   // Fetch PayPal public config and load PayPal SDK if in sandbox mode
   useEffect(() => {
@@ -174,10 +178,6 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
     }
   }, [sdkReady, isPaymentOpen, activeOrder?.id, token, paymentAttempt, setPaymentAttempt, setActiveOrder])
 
-  if (!isPaymentOpen || !activeOrder) return null
-
-  const totalFormatted = formatCurrency(activeOrder.total_minor, activeOrder.currency)
-
   // Buyer approval simulation handler
   const handleSimulateApproval = async () => {
     const attemptId = paymentAttempt?.attempt_id || paymentAttempt?.id
@@ -199,38 +199,52 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
   }
 
   // Capture handler (supports normal success or simulated failure)
-  const handleCapture = async (simulateFailure = false) => {
-    const attemptId = paymentAttempt?.attempt_id || paymentAttempt?.id
-    if (!activeOrder?.id || !attemptId || !token) return
-    try {
-      setIsCapturing(true)
-      setError(null)
-      const capturedAttempt = await api.capturePayment(
-        activeOrder.id,
-        attemptId,
-        token,
-        simulateFailure
-          ? {
-              simulate_failure: true,
-              failure_reason: 'Simulated payment failure (insufficient buyer funds in demo mode)',
-            }
-          : undefined
-      )
-      setPaymentAttempt(capturedAttempt)
+  const handleCapture = useCallback(
+    async (simulateFailure = false) => {
+      const attemptId = paymentAttempt?.attempt_id || paymentAttempt?.id
+      if (!activeOrder?.id || !attemptId || !token) return
+      try {
+        setIsCapturing(true)
+        setError(null)
+        const capturedAttempt = await api.capturePayment(
+          activeOrder.id,
+          attemptId,
+          token,
+          simulateFailure
+            ? {
+                simulate_failure: true,
+                failure_reason: 'Simulated payment failure (insufficient buyer funds in demo mode)',
+              }
+            : undefined
+        )
+        setPaymentAttempt(capturedAttempt)
 
-      // Refresh order status from backend
-      const refreshedOrder = await api.getOrder(activeOrder.id, token)
-      setActiveOrder(refreshedOrder)
-    } catch (err) {
-      if (err instanceof ApiErrorResponse) {
-        setError(`[${err.code}] ${err.message}`)
-      } else {
-        setError(err instanceof Error ? err.message : 'Capture failed')
+        // Refresh order status from backend
+        const refreshedOrder = await api.getOrder(activeOrder.id, token)
+        setActiveOrder(refreshedOrder)
+
+        if (capturedAttempt.status === 'captured') {
+          clearCheckoutRecoveryData()
+        }
+      } catch (err) {
+        if (err instanceof ApiErrorResponse) {
+          setError(`[${err.code}] ${err.message}`)
+        } else {
+          setError(err instanceof Error ? err.message : 'Capture failed')
+        }
+      } finally {
+        setIsCapturing(false)
       }
-    } finally {
-      setIsCapturing(false)
-    }
-  }
+    },
+    [
+      activeOrder,
+      paymentAttempt,
+      token,
+      setActiveOrder,
+      setPaymentAttempt,
+      clearCheckoutRecoveryData,
+    ]
+  )
 
   // Create another attempt on retry
   const handleRetryAttempt = async () => {
@@ -259,18 +273,135 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ onNavigateToOrders }
     }
   }
 
-  // Auto-capture if shopper returns from PayPal approval redirect
+  // Auto-capture and state recovery if shopper returns from PayPal approval redirect
   useEffect(() => {
-    const hash = window.location.hash || ''
-    if (hash.includes('PayerID=') || hash.includes('/checkout/complete')) {
-      const search = hash.includes('?') ? hash.split('?')[1] : window.location.search.substring(1)
-      const params = new URLSearchParams(search)
-      const payerId = params.get('PayerID')
-      if (payerId && paymentAttempt && paymentAttempt.status !== 'captured' && !isCapturing) {
-        handleCapture(false)
+    const handleRedirect = async () => {
+      const hash = window.location.hash || ''
+      if (hash.includes('/checkout/cancel')) {
+        clearCheckoutRecoveryData()
+        setError('PayPal payment was cancelled by shopper. Your order is preserved and can be resumed anytime.')
+        return
+      }
+
+      if (hash.includes('PayerID=') || hash.includes('/checkout/complete')) {
+        const search = hash.includes('?') ? hash.split('?')[1] : window.location.search.substring(1)
+        const params = new URLSearchParams(search)
+        const tokenParam = params.get('token')
+        const payerId = params.get('PayerID')
+        const recoveryToken = params.get('recovery_token') || undefined
+
+        // Prevent duplicate simultaneous capture executions
+        if (hasCapturedRef.current || isCapturing) return
+
+        let currentOrder = activeOrder
+        let currentAttempt = paymentAttempt
+
+        // 1. If activeOrder or paymentAttempt is missing (e.g. browser reload or new tab), recover it
+        if ((!currentOrder || !currentAttempt) && !isRecoveringRef.current) {
+          isRecoveringRef.current = true
+          setIsLoadingAttempt(true)
+          try {
+            const recovered = await restoreCheckoutOrder(
+              tokenParam || undefined,
+              recoveryToken,
+              payerId || undefined
+            )
+            if (recovered) {
+              currentOrder = recovered.order
+              currentAttempt = recovered.attempt
+            }
+          } catch (recErr) {
+            setError(
+              recErr instanceof Error
+                ? recErr.message
+                : 'Failed to restore checkout order after PayPal redirect.'
+            )
+            setIsLoadingAttempt(false)
+            return
+          } finally {
+            setIsLoadingAttempt(false)
+            isRecoveringRef.current = false
+          }
+        }
+
+        if (!currentOrder || !currentAttempt) {
+          if (!payerId) return
+          setError('No active shopping order found matching the returned PayPal payment.')
+          return
+        }
+
+        // 2. Token integrity verification: verify returned token matches attempt's paypal_order_id
+        if (tokenParam && currentAttempt.paypal_order_id && tokenParam !== currentAttempt.paypal_order_id) {
+          setError(
+            `Security validation failed: Returned PayPal token (${tokenParam}) does not match expected PayPal Order ID (${currentAttempt.paypal_order_id}).`
+          )
+          return
+        }
+
+        // 3. Trigger server-side capture only if not already captured
+        if (payerId && currentAttempt.status !== 'captured' && currentOrder.status !== 'paid') {
+          hasCapturedRef.current = true
+          await handleCapture(false)
+        }
       }
     }
-  }, [paymentAttempt, isCapturing])
+
+    handleRedirect()
+  }, [
+    paymentAttempt,
+    activeOrder,
+    isCapturing,
+    restoreCheckoutOrder,
+    clearCheckoutRecoveryData,
+    handleCapture,
+  ])
+
+  if (!isPaymentOpen) return null
+
+  if (!activeOrder) {
+    return (
+      <div className="modal-backdrop" onClick={() => setIsPaymentOpen(false)}>
+        <div
+          className="modal-card"
+          onClick={(e) => e.stopPropagation()}
+          style={{ maxWidth: '520px', textAlign: 'center', padding: '36px 24px' }}
+        >
+          <div
+            style={{
+              width: '36px',
+              height: '36px',
+              border: '3px solid var(--color-tertiary)',
+              borderTopColor: 'var(--color-secondary)',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite',
+              margin: '0 auto 16px',
+            }}
+          />
+          <h3
+            style={{
+              fontSize: '1.15rem',
+              fontWeight: 700,
+              color: 'var(--color-text-primary)',
+              marginBottom: '8px',
+            }}
+          >
+            Restoring Checkout Order...
+          </h3>
+          <p style={{ fontSize: '0.86rem', color: 'var(--color-text-secondary)', margin: 0 }}>
+            Verifying PayPal approval details and synchronizing order status with backend gateway.
+          </p>
+          {error && (
+            <div className="alert alert-error" style={{ marginTop: '16px', textAlign: 'left' }}>
+              <AlertOctagon size={16} />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const totalFormatted = formatCurrency(activeOrder.total_minor, activeOrder.currency)
 
   return (
     <div className="modal-backdrop" onClick={() => setIsPaymentOpen(false)}>

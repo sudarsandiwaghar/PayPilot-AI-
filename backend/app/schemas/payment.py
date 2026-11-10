@@ -12,6 +12,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.order import OrderOut
+
 
 class PaymentCreateResponse(BaseModel):
     """Response returned upon creating a payment attempt."""
@@ -103,3 +105,22 @@ class PayPalPublicConfig(BaseModel):
     mode: str = Field(default="mock", description="'mock', 'sandbox', or 'live'.")
     currency: str = Field(default="USD", description="Default checkout currency.")
     is_demo: bool = Field(default=True, description="True if running synthetic mock payments.")
+
+
+class PayPalResolveReturnRequest(BaseModel):
+    """Payload for resolving a PayPal return redirect with recovery token."""
+
+    recovery_token: str = Field(description="HMAC recovery token embedded in PayPal return URL.")
+    paypal_order_id: str = Field(description="PayPal Order ID returned by gateway in 'token' parameter.")
+    payer_id: str | None = Field(default=None, description="PayPal PayerID parameter returned by gateway.")
+
+
+class PayPalResolveReturnResponse(BaseModel):
+    """Response returned upon resolving a PayPal return redirect."""
+
+    session_id: UUID
+    access_token: str = Field(description="Authorized Bearer token for the restored shopping session.")
+    order: OrderOut
+    attempt: PaymentAttemptOut
+    stock_re_reserved: bool = Field(default=False, description="True if expired stock was atomically re-reserved.")
+

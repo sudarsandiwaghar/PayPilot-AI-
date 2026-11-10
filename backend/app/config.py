@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     paypal_mode: str = Field(default="mock", pattern=r"^(mock|demo|sandbox|live)$")
     paypal_base_url: str = "https://api-m.sandbox.paypal.com"
     paypal_webhook_id: str = ""
+    paypal_recovery_token_ttl_minutes: int = Field(
+        default=45,
+        ge=5,
+        le=1440,
+        description="Minutes before a PayPal return recovery token expires.",
+    )
 
     # ── LLM / AI Shopping Agent ───────────────────────────────────
     llm_provider: str = Field(
@@ -149,8 +155,12 @@ class Settings(BaseSettings):
         default=[
             "http://localhost:3000",
             "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:5175",
             "http://127.0.0.1:3000",
             "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174",
+            "http://127.0.0.1:5175",
         ]
     )
 

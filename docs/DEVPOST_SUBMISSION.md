@@ -1,180 +1,160 @@
 # Devpost Submission Pack — PayPilot AI
 
+**PayPal AI Hackathon Submission**  
+**Submission Date:** November 10, 2026  
+**Repository:** [https://github.com/sudarsandiwaghar/PayPilot-AI-](https://github.com/sudarsandiwaghar/PayPilot-AI-)  
+**License:** Open-Source MIT License ([`LICENSE`](file:///c:/Users/sudar/Documents/Paypilot%20AI/LICENSE))  
+
 ---
 
 ## 1. Project Overview & Elevator Pitch
 
-* **Project Title:** PayPilot AI
-* **Tagline:** Budget-aware AI shopping with transparent, safer checkout.
-* **Primary Category:** E-Commerce / Artificial Intelligence / FinTech
-* **Repository:** [https://github.com/sudarsandiwaghar/PayPilot-AI-](https://github.com/sudarsandiwaghar/PayPilot-AI-)
-* **Current Code Baseline:** Commit [`10f3274e3dfda6967442f48d1ab9d829f6a90a58`](https://github.com/sudarsandiwaghar/PayPilot-AI-/commit/10f3274e3dfda6967442f48d1ab9d829f6a90a58)
+### Project Title
+**PayPilot AI** — Autonomous Shopping Assistant with Constraint-Bound Decision Layer & Secure PayPal Sandbox Checkout
+
+### Tagline
+Budget-aware AI shopping assistant with grounded catalog discovery and cryptographically verified, human-in-the-loop PayPal checkout.
+
+### Category Tracks
+- **AI Agents & Conversational Commerce**
+- **FinTech / PayPal Developer Platform Integration**
 
 ### Elevator Pitch
-PayPilot AI is a budget-aware AI shopping assistant that couples conversational natural-language product discovery with deterministic backend safeguards. Shoppers enter plain-English requests, receive recommendations grounded strictly in the catalog, compare items side-by-side, and proceed through a two-stage checkout protected by HMAC-SHA256 signed preview tokens and temporary inventory holds. By enforcing hard budget constraints, read-only AI tools, and simulated payment lifecycles, PayPilot AI demonstrates how conversational commerce can eliminate price hallucinations, accidental purchases, and inventory overselling.
+Online shoppers face a dilemma: conversational AI makes discovering products intuitive, but typical LLMs hallucinate prices, invent phantom discounts, and lack safeguards against accidental or unauthorized purchases. 
+
+**PayPilot AI** bridges this trust gap. It pairs a live Google Gemini AI model for natural-language understanding with a deterministic backend decision engine, pessimistic PostgreSQL row locks (`SELECT FOR UPDATE`), 15-minute temporary stock reservations, and official PayPal Developer Platform Standard Checkout (Orders API v2). Shoppers search in conversational English, receive recommendations grounded strictly in catalog evidence, compare products side-by-side, and complete purchases through a two-stage cryptographic checkout where every dollar and stock unit is verified server-side before buyer authorization and authoritative capture.
 
 ---
 
-## 2. Built With Tags
+## 2. Devpost Submission Fields
 
-> [!NOTE]
-> Only technologies verified in the repository are listed below. Unverified third-party services are explicitly labeled.
+### Problem Statement
+Generative AI chatbots are rapidly entering modern retail, but standard conversational interfaces introduce severe hazards when handling real transactions:
+1. **Price & Inventory Hallucinations:** Generative models easily hallucinate discounts, quote incorrect prices, or promise out-of-stock items.
+2. **Autonomous Overreach:** Allowing autonomous AI agents to initiate transactions without explicit human approval risks accidental orders, liability, and loss of consumer trust.
+3. **Checkout Race Conditions & Tampering:** Client-side pricing calculations are vulnerable to tampering, while delays between recommendation and payment often cause inventory overselling and unexpected payment capture failures.
 
-* **Backend:** Python 3.12+ (tested on 3.14), FastAPI, Pydantic v2, SQLAlchemy (asyncio), asyncpg, Alembic, PostgreSQL 16
-* **Frontend:** React 19, TypeScript, Vite, Lucide React, CSS3 Design Tokens
-* **Security & Auth:** HMAC-SHA256 Signed Tokens, CSPRNG Bearer Tokens, SHA-256 Hashing, Constant-Time Digest Comparison (`hmac.compare_digest`), Pessimistic Database Locks (`SELECT FOR UPDATE`)
-* **Testing & Quality:** Pytest, pytest-asyncio, Node.js Native Test Runner (`node:test`), Oxlint, Headless Chrome DevTools Protocol (CDP) — 114/114 passing backend tests (100% pass rate)
-* **AI Architecture:** Live Google Gemini Provider (`GeminiLLMProvider` using `gemini-flash-lite-latest`) with Pydantic Schema Validation, Grounded Catalog Explanations, Bounded Read-Only Tool Registry, Deterministic Knapsack Budget Optimizer, Composite Ranking Formula, and Deterministic Offline Provider (`MockLLMProvider`)
-* **Payment Gateway:** PayPal Developer Platform Standard Checkout (Orders API v2: `POST /v2/checkout/orders` with `intent: CAPTURE`, `POST /v2/checkout/orders/{id}/capture`), Authoritative `paypal_capture_id` persistence with unique DB index, Idempotent Server-Side Capture, and Demo/Sandbox Modes
-* **License:** Open-Source MIT License (`LICENSE`)
-* **Optional / Unverified Cloud Services:**
-  * *Cloud Hosting (Render + Neon / Vercel):* Multi-service blueprints prepared; cloud runtime deployment remains optional.
-
----
-
-## 3. Devpost Project Story
-
-### Inspiration
-Generative AI chatbots are rapidly entering online retail, but standard LLM chat interfaces present severe risks in transactional e-commerce:
-1. **Price & Feature Hallucinations:** Language models can quote non-existent discounts, hallucinate stock, or invent features.
-2. **Unconstrained Autonomous Purchasing:** Allowing autonomous agents to execute purchases or modify carts without explicit human approval risks accidental orders and liability.
-3. **Checkout Race Conditions & Tampering:** Without cryptographic verification between price quotes and order submission, users can manipulate client-side totals or suffer race conditions where inventory is oversold during payment.
-
-We built **PayPilot AI** to show that conversational commerce does not require blind trust in an LLM. By placing deterministic algorithms, row-level database locking, and cryptographic token verification around the AI model, shoppers get the convenience of natural-language discovery with complete financial and inventory safety.
+### Solution: The PayPilot AI Approach
+PayPilot AI treats the LLM strictly as an **intent extraction and natural-language synthesis layer**, surrounding it with hard, deterministic financial and database boundaries:
+- **Strictly Grounded AI:** The Google Gemini AI model extracts structured constraints (`category`, `budget_ceiling`, `required_features`, `preferences`).
+- **Deterministic Filtering & Knapsack Optimization:** Candidate products are strictly queried from PostgreSQL; budgets are calculated via a deterministic greedy knapsack optimizer in Python.
+- **Two-Stage Cryptographic Checkout:**
+  - *Stage 1 (Preview):* Issues a tamper-evident HMAC-SHA256 signed preview token binding cart version, item fingerprint, prices, and a 10-minute expiry timestamp.
+  - *Stage 2 (Confirmation):* Re-verifies the signature and cart fingerprint, acquires pessimistic row-level database locks (`SELECT ... FOR UPDATE`), and places a 15-minute temporary inventory reservation.
+- **Human-in-the-Loop PayPal Checkout:** Creates an official PayPal Orders API v2 order (`intent: CAPTURE`). The user personally authorizes the purchase in the secure PayPal Sandbox modal.
+- **Authoritative Server-Side Capture:** The backend re-verifies inventory availability before calling PayPal's capture endpoint, permanently committing the stock and persisting the authoritative `paypal_capture_id`.
 
 ---
 
-### What It Does
-* **Natural-Language Product Request:** Shoppers enter their own plain-English requests (e.g. *"Noise-canceling headphones for air travel under $400"* or *"Lightweight laptop with 16GB RAM"*).
-* **Grounded Recommendations & Clarification:** Queries are parsed and strictly grounded against the catalog. When shopper requests are ambiguous, the assistant asks for clarification rather than hallucinating products.
-* **Fast Catalog Typeahead Search:** On the Product Catalog view, shoppers can type naturally with real-time typeahead (debounced ~280–300ms) matching names, categories, brands, specifications (e.g. `OLED`, `Titanium`, `USB-C`), and normalized variants (such as `"electronic"` mapping to real tech products).
-* **Visible Cart Quantity & Responsive Sticky Bar:** Displays authoritative total units ($\sum \text{quantity}$), immediate addition feedback (`"Added to cart +1"`, `"Added to cart +2"`), and a compact floating bar that remains accessible on both mobile and desktop viewports.
-* **Side-by-Side Product Comparison:** Compares up to 4 catalog items across technical specifications, ratings, stock counts, and AI match reasons.
-* **Two-Stage Cryptographic Checkout:**
-  * *Stage 1 (Preview):* Calculates prices, stock availability, and issues a tamper-evident HMAC-SHA256 signed preview token binding cart version, item fingerprint, prices, and a 10-minute expiry timestamp.
-  * *Stage 2 (Confirmation):* Re-verifies the signature and cart fingerprint, acquires pessimistic row-level database locks (`SELECT ... FOR UPDATE`), and places a 15-minute temporary inventory reservation.
-* **Simulated Payment Lifecycle with Production Guards:** Shoppers test payment approval, failure, retry, and capture using synthetic identifiers (`DEMO-PAYPAL-ORD-...`). Every step displays prominent notices that no real payment is processed, while backend production guards strictly prevent mock captures in production environments.
-* **Session Order & Spend History:** Displays placed orders, itemized receipts, and settled spend calculated directly from confirmed session orders.
+## 3. Technical Architecture & Implementation
+
+### A. How Google Gemini AI is Used
+- **Provider:** `GeminiLLMProvider` using Google Gemini 1.5 Flash via REST (`https://generativelanguage.googleapis.com/v1beta`).
+- **Structured Pydantic Extraction:** Translates free-form shopper queries into typed `ShoppingIntent` objects containing explicit category, budget ceiling, required features, preferences, excluded features, and ranking priorities.
+- **Grounded Explanations:** Explanations strictly cite catalog specifications and verified source claims (`ProductSource`), preventing any synthetic or hallucinated product attributes.
+- **Strict Boundary Security:** Product descriptions and catalog data never control agent tool execution; only read-only allowlisted catalog tools are accessible.
+- **Deterministic Fallback:** An offline deterministic provider (`MockLLMProvider`) is included, enabling full test-suite execution with zero network dependency.
+
+### B. How PayPal Developer Sandbox is Integrated
+- **Integration Standard:** Official PayPal Developer Platform Standard Checkout via Orders API v2.
+- **Order Creation:** `POST /v2/checkout/orders` with `intent: "CAPTURE"`, itemized purchase units, and dynamic origin-based return/cancel URLs.
+- **Buyer Authorization Experience:** Official PayPal Sandbox popup/modal (`https://www.sandbox.paypal.com/checkoutnow?token={id}`) using US Sandbox Buyer account (`sb-8wbqq53769561@personal.example.com`).
+- **Authoritative Capture:** `POST /v2/checkout/orders/{id}/capture` executed strictly on the backend after verified buyer approval.
+- **Persistence & Idempotency:** The authoritative `paypal_capture_id` is stored in PostgreSQL with a unique database index, and each attempt carries a unique idempotency key to prevent double charges upon network retries.
+- **Checkout State Recovery:** HMAC-signed 45-minute recovery tokens allow shoppers in cold tabs or private windows to return, automatically re-reserve stock if the initial 15-minute hold elapsed, and safely capture payment.
+
+### C. Database & Security Information
+- **Database Engine:** PostgreSQL (tested on PostgreSQL 16 & Neon Serverless) with asynchronous SQLAlchemy 2.0 and asyncpg connection pooling.
+- **Concurrency Protection:** Row-level locks (`SELECT ... FOR UPDATE`) prevent two concurrent shoppers from purchasing the final available unit.
+- **Secret Redaction:** Active logging filters (`SecretFilter`) automatically redact credentials, PayPal secrets, and Gemini keys from exception logs.
+- **Zero Client Secrets:** Client bundles contain zero API keys, secrets, or privileged credentials.
 
 ---
 
-### How We Built It
-* **FastAPI Backend Architecture:** Designed around asynchronous SQLAlchemy ORM, Pydantic v2 schemas, and standard RFC error envelopes. Every endpoint requires CSPRNG session token validation via constant-time comparison.
-* **Deterministic Decision Engine:** Implemented a fixed 6-stage pipeline: intent extraction, SQL hard filtering, deterministic composite scoring ($0.4\times\text{req} + 0.3\times\text{rating} + 0.2\times\text{pref} + 0.1\times\text{price}$), greedy knapsack budget allocation, explanation generation, and audit logging.
-* **Bounded Agent Tool Registry:** Restricted agent tool access strictly to an allowlisted registry (`ALLOWED_TOOLS`) containing 4 read-only tools (`search_products`, `get_product_detail`, `compare_products`, `optimize_budget`). Unallowlisted actions (such as `create_order` or `initiate_payment`) are forbidden and rejected with HTTP 403.
-* **React 19 & TypeScript Frontend:** Single-page application built on Vite, styled strictly with the canonical design system: Primary `#321064`, Secondary `#6D28D9`, Soft Surface `#F4F0FA`, White `#FFFFFF`, Text `#21152F` / `#62576F`, and Borders `#DED6E9`.
+## 4. Technology Stack & "Built With" Tags
+
+- **Frontend:** React 19, TypeScript 6.0, Vite 8.3, Lucide React, CSS3 Design Tokens
+- **Backend:** Python 3.12+ (tested on Python 3.14), FastAPI 0.115, Pydantic v2, Uvicorn, Starlette
+- **Database & Migrations:** PostgreSQL 16, SQLAlchemy 2.0 (asyncio), asyncpg, Alembic
+- **AI & LLM:** Google Gemini 1.5 Flash (`GeminiLLMProvider`), Pydantic Schema Parsing
+- **Payments:** PayPal Developer Platform Standard Checkout, Orders API v2 (`intent: CAPTURE`)
+- **Security:** HMAC-SHA256, CSPRNG Session Tokens, SHA-256 Hashing, Pessimistic Row Locking
+- **Quality & Tests:** Pytest (124/124 tests pass), Oxlint (0 warnings), Node.js test runner (7/7 tests pass)
+- **License:** Open-Source MIT License
 
 ---
 
-### Challenges We Ran Into
-1. **Preventing AI Hallucinations in Budget Optimization:** Early prompt engineering attempts frequently resulted in the LLM recommending combinations that slightly exceeded the budget ceiling. We solved this by extracting the budget parameter and delegating budget allocation entirely to a deterministic greedy knapsack optimizer in Python.
-2. **Eliminating Race Conditions During Checkout:** Concurrency conflicts can cause items to be sold out between preview review and payment capture. We solved this by implementing row-level pessimistic locks (`SELECT FOR UPDATE`) ordered by product ID during order confirmation, combined with a 15-minute temporary reservation TTL and an advisory-locked background sweeper.
-3. **Handling E-Commerce Search Variants Without External Heavy Engines:** Shoppers expect queries like `"electronic"` to return tech items even when categories are named `"Audio"` or `"Computing"`. We implemented query normalization and concept synonym mapping that associates broad terms with actual catalog products while cleanly excluding non-electronic furniture.
+## 5. Concise Demo Walkthrough for Judges (2–3 Minutes)
+
+### Step 1: Open the Application
+- Open `http://localhost:5173` (or port `5175`).
+- The application automatically establishes a secure anonymous session with a signed Bearer token.
+- Browse the 20 seeded catalog products across Audio, Computing, Wearables, and Home Office.
+
+### Step 2: Live AI Conversational Search
+- Click the **Chat** tab or input bar.
+- Type: `"Find wireless noise cancelling headphones under $400 for travel"`.
+- **Observe:** The Google Gemini AI model extracts:
+  - `category = "Audio"`
+  - `budget_ceiling = $400.00`
+  - `required_features = ["noise-canceling", "wireless"]`
+- The decision engine applies database filters and Knapsack ranking, returning top matches (e.g., Sony WH-1000XM5 and Bose QuietComfort 45) with grounded specification citations.
+
+### Step 3: Product Comparison & Cart
+- Click **Compare** to view side-by-side specifications, pros, cons, and ratings.
+- Click **Add to Cart** on the Sony WH-1000XM5 ($399.99).
+- Open the Cart Drawer and click **Review Checkout Preview**.
+- Notice the HMAC-SHA256 signed checkout preview locking the cart total server-side.
+
+### Step 4: Two-Stage Checkout & PayPal Sandbox
+- Check **Confirm Order & Reserve Stock**.
+- The backend acquires a row lock, creates the internal order, and places a 15-minute stock hold.
+- Click **Confirm & Pay with PayPal**.
+- The backend calls PayPal Orders API v2 and returns the official PayPal Sandbox approval modal.
+
+### Step 5: Buyer Approval & Server Capture
+- Log in to PayPal Sandbox with the test buyer credentials:
+  - **Email:** `sb-8wbqq53769561@personal.example.com`
+- Authorize the $399.99 payment in the PayPal Sandbox popup.
+- Return to PayPilot AI. The application verifies authoritative status `APPROVED`, revalidates inventory, and triggers server-side capture.
+- The order transitions to **PAID**, the reservation is committed to stock, and the unique `paypal_capture_id` is displayed on the verified receipt.
 
 ---
 
-### Accomplishments We're Proud Of
-* **100% Automated Test Pass Rate:** 114 backend pytest tests passing (100% pass rate), 20 frontend node tests passing, 0 oxlint warnings/errors across 26 files, and complete headless Chrome CDP browser smoke test passing end-to-end.
-* **Zero Client Secrets:** No third-party payment or LLM secrets are stored in the client application or required for local evaluation.
-* **Tamper-Proof Checkout:** Cryptographic token binding guarantees that client-side requests cannot alter product prices or bypass inventory validation.
+## 6. Screenshots & Video Scene List
+
+### Required Screenshots
+1. **`01_product_catalog.png`:** The responsive product grid showing 20 seeded catalog items with price tags, stock badges, and category tabs.
+2. **`02_gemini_ai_recommendations.png`:** The Conversational Chat interface showing user's natural language request, Gemini's extracted constraints, and grounded recommendations.
+3. **`03_product_comparison.png`:** Side-by-side specification comparison matrix with match scores and catalog evidence.
+4. **`04_checkout_preview_modal.png`:** The two-stage checkout modal with itemized breakdown, tax calculation, and HMAC-signed preview notice.
+5. **`05_paypal_sandbox_approval.png`:** The official PayPal Sandbox buyer approval modal showing merchant `SGSNXCUMZPJXJ` and $399.99 USD amount.
+6. **`06_verified_order_receipt.png`:** Final receipt screen showing Order ID, PayPal Order ID, Authoritative Capture ID, and PAID status.
+
+### Demo Video Scenes (2–3 Minutes)
+- **Scene 1 (0:00 – 0:40):** Problem explanation & live Gemini AI conversational search.
+- **Scene 2 (0:40 – 1:15):** Grounded product comparison & sticky cart management.
+- **Scene 3 (1:15 – 1:55):** Two-stage cryptographic checkout, HMAC preview, and stock reservation.
+- **Scene 4 (1:55 – 2:30):** PayPal Sandbox buyer authorization and authoritative server-side capture.
+- **Scene 5 (2:30 – 2:50):** Order receipt, capture ID verification, and order history audit trail.
 
 ---
 
-### What We Learned
-* In transactional and financial AI applications, generative models should be confined to natural-language understanding and synthesis; all pricing, budgeting, inventory reservation, and payment execution must remain strictly deterministic and auditable.
-* Temporary stock holds with background expiration sweepers provide a vastly better customer experience than failing at final payment capture.
+## 7. Commands to Launch for Judges
 
----
+### Backend (Terminal 1)
+```bash
+# Activate virtual environment
+.venv\Scripts\Activate.ps1    # On Windows
+# source .venv/bin/activate   # On Linux/macOS
 
-### What's Next
-* **Authenticated Merchant Feeds:** Integrate verified retail API adapters (e.g. Best Buy Developer API) using structured contracts rather than web scraping.
-* **Live Sandbox Verification:** Configure and verify PayPal Sandbox OAuth tokens and real test buyer sandbox captures.
-* **Persistent Multi-Session Accounts:** Extend beyond anonymous sessions to support authenticated user accounts with multi-session budget tracking.
+# Start FastAPI backend server
+uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+```
 
----
-
-## 4. Truthful 2–3 Minute Demo Script
-
-> [!IMPORTANT]
-> **Demo Ground Rules & Transparency Notice:**
-> - Recommendations are grounded strictly in the seeded demo catalog and its verified attributes.
-> - Payment approval, failure, retry, and capture are simulated in mock demo mode. No real money is processed.
-> - Live cloud staging and live PayPal/Gemini credentials remain unverified optional integrations.
-
-### Minute 1: Natural-Language Discovery & Live Typeahead (0:00 – 1:00)
-1. **Product Catalog Typeahead:**
-   * Open the web app on `http://localhost:5173/#/catalog`.
-   * Point out the category tabs, active session pill in the header, and search field.
-   * Type `"electronic"` slowly into the search field.
-   * *Talking Point:* *"PayPilot AI offers fast, catalog-grounded typeahead search. Notice that typing 'electronic' immediately surfaces matching tech items and updates the product grid without pressing Enter, normalizing terms and filtering real catalog items."*
-   * Use keyboard arrow keys to highlight a suggestion, press Enter to scroll to and highlight the product card, and click **Add to Cart**.
-   * *Talking Point:* *"Notice the instant '+1' indicator on the card and the floating sticky cart bar at the bottom, which tracks authoritative unit counts without covering controls."*
-
-2. **AI Shopping Assistant:**
-   * Navigate to the **AI Search Results** tab (`#/agent`).
-   * Enter a natural-language request: e.g. *"Noise-canceling headphones for air travel under $400"*.
-   * Click **Search with AI**.
-   * *Talking Point:* *"Shoppers are not locked into preset prompt buttons—they can enter arbitrary queries. The backend extracts category and budget constraints, verifies catalog stock, and ranks candidates using a deterministic scoring formula."*
-   * Point out the match score and grounded catalog claims on the recommendation card.
-
-### Minute 2: Two-Stage Checkout & Cryptographic Token Binding (1:00 – 2:00)
-1. **Review Checkout Preview:**
-   * Click **View Cart** on the sticky cart bar or top navigation to open the cart drawer.
-   * Click **Review Checkout Preview**.
-   * *Talking Point:* *"To prevent client-side price tampering and inventory race conditions, PayPilot uses a two-stage checkout. Stage 1 issues an HMAC-SHA256 signed preview token that locks the cart version, item fingerprint, prices, and a 10-minute expiry."*
-2. **Confirm Order & Reserve Stock:**
-   * Review the itemized breakdown and check the **Explicit Shopper Confirmation** checkbox.
-   * Click **Confirm Order & Reserve Stock**.
-   * *Talking Point:* *"Upon confirmation, the backend verifies the cryptographic signature, acquires row-level locks with SELECT FOR UPDATE, creates the order, and places a 15-minute temporary inventory hold so items aren't oversold while the customer pays."*
-
-### Minute 3: Simulated Payment Lifecycle & Audit Trail (2:00 – 3:00)
-1. **Failure Simulation & Resilience:**
-   * Point out the prominent banner: **"Demo payment — no real payment processed"** (`Synthetic Demo`).
-   * Click **Simulate Payment Failure (Test Retry Flow)**.
-   * *Talking Point:* *"We simulate failure to demonstrate resilience: Attempt #1 fails with `payment_failed`, but the backend preserves the 15-minute stock reservation so the shopper never loses their cart."*
-2. **Retry, Approval & Capture:**
-   * Click **Retry Payment (Attempt #2)**.
-   * Click **Simulate Buyer Approval**, then **Verify & Capture Demo Payment**.
-   * *Talking Point:* *"With one click, we simulate approval and capture. The backend atomically commits the held stock and marks the order as PAID."*
-3. **View Receipt & Session History:**
-   * Click **View Order Receipt** to view the itemized breakdown and payment audit trail.
-   * Navigate to the **Orders** tab to show session settled spend and placed orders.
-   * *Talking Point:* *"Everything is transparent: shoppers can inspect their session order history and verify that no real funds were charged."*
-
----
-
-## 5. Pre-Submission Checklist
-
-### Media & Submission Assets Checklist
-- [ ] **Repository URL:** Set to `https://github.com/sudarsandiwaghar/PayPilot-AI-` (public or accessible to judges).
-- [ ] **Video Demonstration:** Record a 2–3 minute video following the script above. Ensure high resolution (1080p) with clear audio.
-- [ ] **Screenshots (Minimum 4 Recommended):**
-  1. Product Catalog with live typeahead dropdown active.
-  2. AI Shopping Assistant with custom natural-language query and grounded recommendations.
-  3. Two-stage Checkout Preview modal with signed preview token and confirmation checkbox.
-  4. Payment Modal showing the simulated demo payment notice and retry flow.
-  5. Orders History View showing settled spend and itemized receipt.
-- [ ] **Banner / Thumbnail:** 1200x630px image utilizing the canonical Deep Purple (`#321064`) and Vibrant Violet (`#6D28D9`) palette.
-
----
-
-## 6. Claims That Must NOT Be Made (Unverified Claims)
-
-| Claim Category | Forbidden / False Claim | Truthful Repo Reality |
-| :--- | :--- | :--- |
-| **Payment Processing** | "Processes live credit cards / PayPal payments in real time" | **Simulated Demo Only:** `PAYPAL_MODE=mock`. Uses synthetic identifiers (`DEMO-PAYPAL-ORD-...`). Real PayPal credentials have not been verified. |
-| **Live Web Scraping** | "Scrapes live prices across Amazon, Best Buy, and Walmart" | **Seeded Catalog Only:** 20 curated demo products seeded via `app/seed/catalog.py` with explicit `is_demo_data=True` and `verified_at=None`. No live web crawling. |
-| **Live Gemini Model** | "Powered by live Google Gemini 1.5 Pro in the deployed app" | **Mock Provider Active by Default:** `LLM_PROVIDER=mock`. `GeminiLLMProvider` is scaffolded with header auth and fallback, but live API calls are unverified without an external user-supplied key. |
-| **Cloud Deployment** | "Live and running at paypilot.onrender.com" | **Cloud Staging Unverified:** Blueprint and Neon branches exist, but live cloud runtime health probes have not been directly observed. Demo runs verified locally on `http://127.0.0.1:8000` and `:5173`. |
-| **User Accounts** | "Manages multi-month user accounts and bank budgets" | **Session-Bound Ephemeral Scope:** Anonymous sessions (`ShoppingSession`) with bearer tokens. Budget limits are evaluated dynamically per single-turn query constraint. |
-
----
-
-## 7. Challenge-Specific Requirements To Verify
-
-If submitting to a specific hackathon on Devpost, check the hackathon's official rules page for:
-1. **Track / Category Selection:** Confirm which category (e.g. AI Agents, E-Commerce, FinTech) matches PayPilot AI.
-2. **Required Sponsor Technologies:** If the hackathon requires a specific sponsor API (e.g. Google Gemini, PayPal, or PostgreSQL), confirm whether simulated mock mode is accepted or if live sandbox API keys must be demonstrated during judging.
-3. **Video Duration Limit:** Verify whether the video must be strictly under 2 or 3 minutes.
-4. **Team Members:** Ensure all team contributors are invited to the Devpost project before submission.
-
+### Frontend (Terminal 2)
+```bash
+cd frontend
+npm run dev
+# Live at http://localhost:5173 (or http://localhost:5175)
+```

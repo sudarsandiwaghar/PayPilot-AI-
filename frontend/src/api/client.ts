@@ -16,6 +16,8 @@ import type {
   OrderData,
   PaginatedResponse,
   PayPalPublicConfig,
+  PayPalResolveReturnRequest,
+  PayPalResolveReturnResponse,
   PaymentAttemptData,
   ProductDetail,
   ProductFilterParams,
@@ -348,6 +350,27 @@ export const api = {
     return attempt
   },
 
+  async resolvePayPalReturn(
+    payload: PayPalResolveReturnRequest
+  ): Promise<PayPalResolveReturnResponse> {
+    const res = await request<PayPalResolveReturnResponse>(
+      '/api/v1/payments/paypal/resolve-return',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    )
+    if (res.attempt) {
+      res.attempt.id = res.attempt.attempt_id
+    }
+    if (res.order?.items) {
+      res.order.items.forEach((item) => {
+        item.price_minor = item.unit_price_minor
+      })
+    }
+    return res
+  },
+
   async getOrder(orderId: string, token: string): Promise<OrderData> {
     const order = await request<OrderData>(`/api/v1/orders/${orderId}`, { method: 'GET' }, token)
     if (order.items) {
@@ -356,6 +379,20 @@ export const api = {
       })
     }
     return order
+  },
+
+  async listPaymentAttempts(orderId: string, token: string): Promise<PaymentAttemptData[]> {
+    const attempts = await request<PaymentAttemptData[]>(
+      `/api/v1/orders/${orderId}/payments`,
+      { method: 'GET' },
+      token
+    )
+    if (Array.isArray(attempts)) {
+      attempts.forEach((att) => {
+        att.id = att.attempt_id
+      })
+    }
+    return attempts
   },
 
   async getPayPalConfig(): Promise<PayPalPublicConfig> {

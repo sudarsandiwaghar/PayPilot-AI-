@@ -6,7 +6,7 @@
 [![React](https://img.shields.io/badge/React-19.3-61DAFB.svg)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6.svg)](https://www.typescriptlang.org/)
 [![PayPal](https://img.shields.io/badge/PayPal_Developer-Orders_API_v2-003087.svg)](https://developer.paypal.com/)
-[![Tests: 114 Passed](https://img.shields.io/badge/Tests-114%20Passed%20(100%25)-success.svg)](./backend/tests)
+[![Tests: 124 Passed](https://img.shields.io/badge/Tests-124%20Passed%20(100%25)-success.svg)](./backend/tests)
 
 **PayPilot AI** is an intelligent, autonomous shopping assistant and secure e-commerce application built for the **PayPal AI Hackathon**.
 
@@ -21,7 +21,7 @@ It transforms unstructured, natural-language shopping requests into verified, co
 | **1. PayPal Developer Platform Sandbox** | **VERIFIED & COMPLIANT**<br>Official Orders API v2 (`POST /v2/checkout/orders` with `intent: CAPTURE`, `POST /v2/checkout/orders/{id}/capture`). Authoritative capture ID (`paypal_capture_id`) persisted to database. Idempotent server-side capture prevents duplicate charges. Route aliases exposed at `POST /api/payments/paypal/orders` and `POST /api/payments/paypal/orders/{order_id}/capture`. | [`backend/app/services/payment_service.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/app/services/payment_service.py)<br>[`backend/tests/test_payments.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/tests/test_payments.py) (19/19 tests pass) |
 | **2. Actual AI Tool / Model Integration** | **VERIFIED & COMPLIANT**<br>Live Google Gemini API provider (`GeminiLLMProvider`) parsing natural language into typed `LLMStructuredIntentExtract` schemas. Extracts category, budget ceiling, required features, preferences, excluded features, brand preferences, and ranking priorities. Strict error handling with retry limits; never returns fake hardcoded text. Grounded explanations strictly cite catalog specs and source claims. | [`backend/app/services/agent/llm_provider.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/app/services/agent/llm_provider.py)<br>[`backend/tests/test_agent.py`](file:///c:/Users/sudar/Documents/Paypilot%20AI/backend/tests/test_agent.py) (14/14 tests pass) |
 | **3. Detectable Open-Source License** | **VERIFIED & COMPLIANT**<br>Standard Open-Source MIT License located at repository root (`LICENSE`). Detectable by GitHub License API. | [`LICENSE`](file:///c:/Users/sudar/Documents/Paypilot%20AI/LICENSE) (MIT, Copyright (c) 2026 Sudarsan) |
-| **4. Functional Application (Not a Mockup)** | **VERIFIED & COMPLIANT**<br>Complete, executable end-to-end user workflow: natural-language query &rarr; real AI constraint parsing &rarr; database filtering &amp; Knapsack budget optimizer &rarr; cart &rarr; signed preview checkout &rarr; PayPal Sandbox order creation &rarr; buyer approval &rarr; server-side capture &rarr; inventory commit &rarr; verified order receipt. | Full-stack application verified locally &amp; automated test suite (114/114 passing tests). |
+| **4. Functional Application (Not a Mockup)** | **VERIFIED & COMPLIANT**<br>Complete, executable end-to-end user workflow: natural-language query &rarr; real AI constraint parsing &rarr; database filtering &amp; Knapsack budget optimizer &rarr; cart &rarr; signed preview checkout &rarr; PayPal Sandbox order creation &rarr; buyer approval &rarr; server-side capture &rarr; inventory commit &rarr; verified order receipt. | Full-stack application verified locally &amp; automated test suite (124/124 passing tests). |
 | **5. Setup & Execution Instructions** | **VERIFIED & COMPLIANT**<br>Complete instructions for judges to configure PayPal Sandbox credentials, Gemini API key, database migrations, and start both frontend and backend. | This README &amp; [`.env.example`](file:///c:/Users/sudar/Documents/Paypilot%20AI/.env.example). |
 
 ---
@@ -202,14 +202,14 @@ Frontend will be live at: **`http://localhost:5173`**
 
 ## 🧪 Automated Testing & Verification
 
-Run the comprehensive test suite (114 automated tests covering AI schema extraction, PayPal sandbox orders, capture idempotency, stock reservations, and security):
+Run the comprehensive test suite (124 automated tests covering AI schema extraction, PayPal sandbox orders, capture idempotency, stock reservations, checkout recovery, and security):
 
 ```bash
 # From repository root:
 pytest backend/tests -v
 ```
 
-All 114 tests execute against in-memory SQLite/async database fixtures with zero external network dependencies:
+All 124 tests execute against in-memory SQLite/async database fixtures with zero external network dependencies:
 - **`test_agent.py`**: Validates Gemini schema extraction, Pydantic validation, error bubbling, tool allowlisting.
 - **`test_payments.py`**: Validates PayPal Sandbox order creation, buyer approval, server-side capture, `paypal_capture_id` storage, duplicate capture idempotency, and cancellation.
 - **`test_checkout.py`**: Validates HMAC-SHA256 preview tokens and tamper prevention.
